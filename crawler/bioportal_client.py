@@ -1,9 +1,9 @@
 from pathlib import Path
 import os
-
 import requests
 from dotenv import load_dotenv
 
+# Load .env from the project root
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
@@ -25,6 +25,16 @@ class BioPortalClient:
         })
 
     def get_concept(self, concept_id):
+        """
+        Fetch a SNOMED CT concept from BioPortal.
+
+        Parameters:
+            concept_id (str): SNOMED CT Concept ID
+
+        Returns:
+            dict | None: JSON response if found, otherwise None
+        """
+
         class_uri = f"http://purl.bioontology.org/ontology/SNOMEDCT/{concept_id}"
 
         url = (
@@ -32,17 +42,30 @@ class BioPortalClient:
             f"{requests.utils.quote(class_uri, safe='')}"
         )
 
-        response = self.session.get(url, timeout=30)
+        try:
+            response = self.session.get(url, timeout=30)
 
-        print("Status Code:", response.status_code)
+            print(f"Status Code: {response.status_code}")
 
-        if response.status_code != 200:
-            print(response.text)
+            if response.status_code == 200:
+                return response.json()
 
-        response.raise_for_status()
+            print("Error:", response.text)
+            return None
 
-        return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Request Error: {e}")
+            return None
 
+
+if __name__ == "__main__":
+
+    client = BioPortalClient()
+
+    concept = client.get_concept("233604007")
+
+    if concept:
+        print("\nPreferred Label:", concept.get("prefLabel"))
 
 if __name__ == "__main__":
     client = BioPortalClient()
