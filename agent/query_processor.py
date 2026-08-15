@@ -1,32 +1,38 @@
 from database.graph_repository import GraphRepository
 from knowledge_graph.graph_builder import GraphBuilder
+from crawler.bioportal_client import BioPortalClient
 
 
 class QueryProcessor:
     """
-    Resolves a user query to a SNOMED CT concept and
-    requests the relevant graph expansion.
+    Resolves user queries to SNOMED CT concepts.
 
-    This is intentionally deterministic for now.
-    The LLM layer will be added later.
+    Resolution strategy:
+
+    1. Check whether the query is a SNOMED CT ID.
+    2. Search Neo4j for an existing concept.
+    3. If not found, search BioPortal.
+    4. Use the discovered concept ID.
+    5. Dynamically expand the requested concept.
     """
 
     def __init__(self, expansion_depth=2):
+
         self.repository = GraphRepository()
+
         self.graph_builder = GraphBuilder(
             default_depth=expansion_depth
         )
 
+        self.bioportal = BioPortalClient()
+
         self.expansion_depth = expansion_depth
 
     # ========================================================
-    # Detect SNOMED Concept ID
+    # Detect Concept ID
     # ========================================================
 
     def is_concept_id(self, query):
-        """
-        Check whether the query looks like a SNOMED CT ID.
-        """
 
         query = query.strip()
 
@@ -40,12 +46,10 @@ class QueryProcessor:
     # ========================================================
 
     def search_existing_concept(self, name):
-        """
-        Search Neo4j for an already stored concept by name.
-        """
 
         query = """
         MATCH (c:Concept)
+
         WHERE toLower(c.name) = toLower($name)
 
         RETURN
@@ -63,18 +67,16 @@ class QueryProcessor:
         )
 
         if result:
+
             return result[0]
 
         return None
 
     # ========================================================
-    # Search Concept by ID
+    # Get Concept by ID from Neo4j
     # ========================================================
 
     def get_concept_by_id(self, concept_id):
-        """
-        Retrieve a concept directly using its SNOMED CT ID.
-        """
 
         query = """
         MATCH (c:Concept {
@@ -96,31 +98,77 @@ class QueryProcessor:
         )
 
         if result:
+
             return result[0]
 
         return None
 
     # ========================================================
-    # Resolve Query
+    # Resolve Using BioPortal
+    # ========================================================
+
+    def resolve_from_bioportal(self, query):
+
+        print(
+            "\n🔎 Concept not found in Neo4j."
+        )
+
+        print(
+            "Searching BioPortal..."
+        )
+
+        results = self.bioportal.search_concept(
+            query
+        )
+
+        if not results:
+
+            print(
+                "\n❌ No BioPortal results found."
+            )
+
+            return None
+
+        print(
+            f"\nFound {len(results)} BioPortal result(s)."
+        )
+
+        # ----------------------------------------------------
+        # First result for now
+        # ----------------------------------------------------
+
+        best_result = results[0]
+
+        print(
+            "\nSelected Concept:"
+        )
+
+        print(
+            "Name:",
+            best_result["name"]
+        )
+
+        print(
+            "ID:",
+            best_result["concept_id"]
+        )
+
+        return best_result
+
+    # ========================================================
+    # Resolve Concept
     # ========================================================
 
     def resolve_concept(self, query):
-        """
-        Resolve a user query to a SNOMED CT concept.
-
-        Resolution order:
-
-        1. SNOMED CT ID
-        2. Existing concept name in Neo4j
-        """
 
         query = query.strip()
 
         if not query:
+
             return None
 
         # ----------------------------------------------------
-        # Case 1: User provided a SNOMED CT ID
+        # Case 1: SNOMED ID
         # ----------------------------------------------------
 
         if self.is_concept_id(query):
@@ -130,15 +178,37 @@ class QueryProcessor:
             )
 
             if concept:
+
                 return concept
+
+            print(
+                "\nConcept ID not currently in Neo4j."
+            )
+
+            print(
+                "Checking BioPortal..."
+            )
+
+            concept_data = self.bioportal.get_concept(
+                query
+            )
+
+            if not concept_data:
+
+                return None
 
             return {
                 "concept_id": query,
-                "name": None
+                "name": (
+                    concept_data.get(
+                        "prefLabel"
+                    )
+                    or query
+                )
             }
 
         # ----------------------------------------------------
-        # Case 2: Search existing graph by name
+        # Case 2: Existing Neo4j concept
         # ----------------------------------------------------
 
         concept = self.search_existing_concept(
@@ -146,21 +216,26 @@ class QueryProcessor:
         )
 
         if concept:
+
+            print(
+                "\n✅ Concept found in Neo4j."
+            )
+
             return concept
 
-        return None
+        # ----------------------------------------------------
+        # Case 3: Search BioPortal
+        # ----------------------------------------------------
+
+        return self.resolve_from_bioportal(
+            query
+        )
 
     # ========================================================
     # Process Query
     # ========================================================
 
     def process_query(self, query):
-        """
-        Process a user query.
-
-        Returns a dictionary containing the
-        resolved concept and graph information.
-        """
 
         print("\n" + "=" * 60)
         print("SNOMED Query Processor")
@@ -178,39 +253,44 @@ class QueryProcessor:
             query
         )
 
-        # ----------------------------------------------------
-        # Concept not found
-        # ----------------------------------------------------
-
         if concept is None:
 
             print(
-                "\n❌ Concept not found in the current graph."
+                "\n❌ Unable to resolve concept."
             )
 
             return {
                 "success": False,
                 "query": query,
-                "concept": None
+                "concept": None,
+                "parents": [],
+                "children": []
             }
 
-        concept_id = concept["concept_id"]
+        concept_id = concept[
+            "concept_id"
+        ]
 
         concept_name = concept.get(
             "name"
         )
 
         print(
-            f"\n✅ Resolved Concept ID: {concept_id}"
+            "\n✅ Resolved Concept"
         )
 
-        if concept_name:
-            print(
-                f"✅ Concept Name: {concept_name}"
-            )
+        print(
+            "Concept ID :",
+            concept_id
+        )
+
+        print(
+            "Concept Name:",
+            concept_name
+        )
 
         # ----------------------------------------------------
-        # Expand the concept
+        # Expand graph
         # ----------------------------------------------------
 
         print(
@@ -223,24 +303,26 @@ class QueryProcessor:
         )
 
         # ----------------------------------------------------
-        # Retrieve final graph information
+        # Retrieve graph information
         # ----------------------------------------------------
 
-        concept_info = self.graph_builder.get_concept(
-            concept_id
+        concept_info = (
+            self.graph_builder.get_concept(
+                concept_id
+            )
         )
 
-        parents = self.graph_builder.get_parents(
-            concept_id
+        parents = (
+            self.graph_builder.get_parents(
+                concept_id
+            )
         )
 
-        children = self.graph_builder.get_children(
-            concept_id
+        children = (
+            self.graph_builder.get_children(
+                concept_id
+            )
         )
-
-        # ----------------------------------------------------
-        # Result
-        # ----------------------------------------------------
 
         return {
             "success": True,
@@ -261,8 +343,12 @@ if __name__ == "__main__":
         expansion_depth=2
     )
 
+    # --------------------------------------------------------
+    # Test with a concept that may NOT already exist
+    # --------------------------------------------------------
+
     result = processor.process_query(
-        "Pneumonia"
+        "Asthma"
     )
 
     print("\n" + "=" * 60)
@@ -274,19 +360,25 @@ if __name__ == "__main__":
         concept = result["concept"]
 
         print(
-            f"\nConcept: "
-            f"{concept['name']} "
+            "\nConcept:",
+            concept["name"],
             f"({concept['concept_id']})"
         )
 
         print("\nParents:")
 
-        for parent in result["parents"]:
+        if result["parents"]:
 
-            print(
-                f"- {parent['name']} "
-                f"({parent['concept_id']})"
-            )
+            for parent in result["parents"]:
+
+                print(
+                    f"- {parent['name']} "
+                    f"({parent['concept_id']})"
+                )
+
+        else:
+
+            print("- None")
 
         print("\nChildren:")
 
@@ -306,5 +398,5 @@ if __name__ == "__main__":
     else:
 
         print(
-            "\n❌ Could not resolve the query."
+            "\n❌ Query could not be resolved."
         )

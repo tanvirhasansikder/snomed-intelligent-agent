@@ -7,122 +7,100 @@ from database.graph_repository import GraphRepository
 class BFSCrawler:
     """
     Breadth-First Search crawler for dynamically expanding
-    the SNOMED CT hierarchy.
+    relevant portions of the SNOMED CT hierarchy.
 
-    The crawler starts from a SNOMED CT concept, retrieves
-    its parents from BioPortal, stores them in Neo4j, creates
-    IS_A relationships, and continues expanding until the
-    configured maximum depth is reached.
+    Compatible with GraphBuilder.
+
+    The crawler:
+        1. Starts from a requested SNOMED concept.
+        2. Retrieves its parents from BioPortal.
+        3. Saves concepts to Neo4j.
+        4. Creates IS_A relationships.
+        5. Continues expanding until max_depth is reached.
     """
 
     def __init__(self, max_depth=2):
 
         self.client = BioPortalClient()
-
         self.repository = GraphRepository()
 
         self.max_depth = max_depth
 
-        # Queue contains:
-        #
+        # Queue stores:
         # (concept_id, depth)
-        #
         self.queue = deque()
 
         # Concepts already processed
         self.visited = set()
 
     # ========================================================
-    # Add Starting Concept
+    # ADD START CONCEPT
     # ========================================================
 
-    def add_start_concept(self, concept_id):
+    def add_start_concept(
+        self,
+        concept_id,
+        depth=0
+    ):
         """
-        Add the starting SNOMED concept to the BFS queue.
+        Add a starting concept to the BFS queue.
+
+        This method is used by GraphBuilder.
         """
+
+        if not concept_id:
+            return
+
+        # Avoid duplicate start concepts
+        if concept_id in self.visited:
+            return
 
         self.queue.append(
-            (concept_id, 0)
+            (
+                concept_id,
+                depth
+            )
         )
 
     # ========================================================
-    # Extract Parent ID
+    # CRAWL
     # ========================================================
 
-    def extract_parent_id(self, parent):
+    def crawl(self, start_concept_id=None):
         """
-        Extract the SNOMED CT ID from a BioPortal parent
-        response.
+        Run BFS expansion.
 
-        BioPortal may return:
+        If start_concept_id is provided, it will be added
+        to the queue automatically.
 
-            @id
-
-        or:
-
-            id
-
-        Example:
-
-            http://purl.bioontology.org/ontology/SNOMEDCT/205237003
-
-        becomes:
-
-            205237003
+        Returns:
+            set: concepts processed by the crawler.
         """
 
-        if not isinstance(parent, dict):
-            return None
+        # ----------------------------------------------------
+        # Allow standalone usage:
+        #
+        # crawler.crawl("233604007")
+        # ----------------------------------------------------
 
-        parent_uri = (
-            parent.get("@id")
-            or parent.get("id")
-        )
+        if start_concept_id:
 
-        if not parent_uri:
-            return None
+            self.add_start_concept(
+                start_concept_id,
+                0
+            )
 
-        return (
-            parent_uri
-            .rstrip("/")
-            .split("/")
-            [-1]
-        )
-
-    # ========================================================
-    # Extract Parent Name
-    # ========================================================
-
-    def extract_parent_name(self, parent):
-        """
-        Extract the preferred label of a parent concept.
-        """
-
-        if not isinstance(parent, dict):
-            return "Unknown"
-
-        return (
-            parent.get("prefLabel")
-            or parent.get("name")
-            or "Unknown"
-        )
-
-    # ========================================================
-    # Crawl
-    # ========================================================
-
-    def crawl(self):
-
-        processed = 0
-
-        print("\nStarting SNOMED BFS Crawler")
+        print()
+        print("Starting SNOMED BFS Crawler")
         print("=" * 60)
 
-        while self.queue:
+        processed_count = 0
 
-            # ------------------------------------------------
-            # Get next concept
-            # ------------------------------------------------
+        # ====================================================
+        # BFS LOOP
+        # ====================================================
+
+        while self.queue:
 
             concept_id, depth = self.queue.popleft()
 
@@ -137,16 +115,13 @@ class BFSCrawler:
                 concept_id
             )
 
-            processed += 1
+            processed_count += 1
 
-            # ------------------------------------------------
-            # Processing information
-            # ------------------------------------------------
-
-            print("\n" + "=" * 60)
+            print()
+            print("=" * 60)
 
             print(
-                f"Processed : {processed}"
+                f"Processed : {processed_count}"
             )
 
             print(
@@ -161,9 +136,9 @@ class BFSCrawler:
                 f"Concept   : {concept_id}"
             )
 
-            # ------------------------------------------------
-            # Retrieve concept from BioPortal
-            # ------------------------------------------------
+            # =================================================
+            # FETCH CONCEPT
+            # =================================================
 
             concept = self.client.get_concept(
                 concept_id
@@ -172,34 +147,34 @@ class BFSCrawler:
             if not concept:
 
                 print(
-                    f"⚠️ Could not retrieve concept "
-                    f"{concept_id}"
+                    f"⚠️ Could not retrieve "
+                    f"concept: {concept_id}"
                 )
 
                 continue
 
             # ------------------------------------------------
-            # Get preferred label
+            # Extract preferred label
             # ------------------------------------------------
 
             concept_name = (
                 concept.get("prefLabel")
-                or concept.get("name")
-                or "Unknown"
+                or concept.get("label")
+                or concept_id
             )
 
-            # ------------------------------------------------
-            # Save current concept
-            # ------------------------------------------------
+            # =================================================
+            # SAVE CONCEPT
+            # =================================================
 
             self.repository.save_concept(
                 concept_id,
                 concept_name
             )
 
-            # ------------------------------------------------
-            # Maximum depth check
-            # ------------------------------------------------
+            # =================================================
+            # MAX DEPTH CHECK
+            # =================================================
 
             if depth >= self.max_depth:
 
@@ -215,40 +190,44 @@ class BFSCrawler:
 
                 continue
 
-            # ------------------------------------------------
-            # Retrieve direct parents
-            # ------------------------------------------------
+            # =================================================
+            # GET PARENTS
+            # =================================================
 
             parents = self.client.get_parents(
                 concept_id
             )
 
-            if not parents:
-
-                print(
-                    f"No parents found for "
-                    f"{concept_name}."
-                )
-
-                continue
-
             print(
                 f"Found {len(parents)} parent(s)."
             )
 
-            # ------------------------------------------------
-            # Process every parent
-            # ------------------------------------------------
+            # =================================================
+            # PROCESS PARENTS
+            # =================================================
 
             for parent in parents:
 
-                # --------------------------------------------
-                # Extract parent ID
-                # --------------------------------------------
+                # ------------------------------------------------
+                # BioPortalClient returns:
+                #
+                # {
+                #     "concept_id": "...",
+                #     "name": "..."
+                # }
+                # ------------------------------------------------
 
-                parent_id = self.extract_parent_id(
-                    parent
+                parent_id = parent.get(
+                    "concept_id"
                 )
+
+                parent_name = parent.get(
+                    "name"
+                )
+
+                # ------------------------------------------------
+                # Validate parent ID
+                # ------------------------------------------------
 
                 if not parent_id:
 
@@ -259,26 +238,26 @@ class BFSCrawler:
 
                     continue
 
-                # --------------------------------------------
-                # Extract parent name
-                # --------------------------------------------
+                # ------------------------------------------------
+                # Fallback name
+                # ------------------------------------------------
 
-                parent_name = self.extract_parent_name(
-                    parent
-                )
+                if not parent_name:
 
-                # --------------------------------------------
-                # Save parent node
-                # --------------------------------------------
+                    parent_name = parent_id
+
+                # =================================================
+                # SAVE PARENT
+                # =================================================
 
                 self.repository.save_concept(
                     parent_id,
                     parent_name
                 )
 
-                # --------------------------------------------
-                # Create IS_A relationship
-                # --------------------------------------------
+                # =================================================
+                # CREATE IS_A RELATIONSHIP
+                # =================================================
 
                 self.repository.save_relationship(
                     concept_id,
@@ -290,9 +269,9 @@ class BFSCrawler:
                     f"--> {parent_name}"
                 )
 
-                # --------------------------------------------
-                # Add parent to BFS queue
-                # --------------------------------------------
+                # =================================================
+                # ADD PARENT TO QUEUE
+                # =================================================
 
                 if parent_id not in self.visited:
 
@@ -303,21 +282,18 @@ class BFSCrawler:
                         )
                     )
 
-        # ====================================================
-        # Crawling Complete
-        # ====================================================
+        # =====================================================
+        # COMPLETED
+        # =====================================================
 
-        print("\n" + "=" * 60)
-
-        print(
-            "BFS Crawling Completed"
-        )
-
+        print()
+        print("=" * 60)
+        print("BFS Crawling Completed")
         print("=" * 60)
 
         print(
             f"Total Concepts Processed: "
-            f"{processed}"
+            f"{processed_count}"
         )
 
         print(
@@ -330,51 +306,29 @@ class BFSCrawler:
             f"{self.repository.count_relationships()}"
         )
 
+        return self.visited
+
 
 # ============================================================
-# Main
+# STANDALONE TEST
 # ============================================================
 
 if __name__ == "__main__":
 
-    # --------------------------------------------------------
-    # Starting SNOMED CT Concept
-    # --------------------------------------------------------
+    print()
+    print("=" * 60)
+    print("Testing SNOMED BFS Crawler")
+    print("=" * 60)
 
     START_CONCEPT = "233604007"
 
-    # --------------------------------------------------------
-    # Maximum BFS depth
-    #
-    # 0 = Pneumonia only
-    #
-    # 1 = Pneumonia + direct parents
-    #
-    # 2 = Pneumonia + parents + grandparents
-    #
-    # 3 = three levels
-    # --------------------------------------------------------
-
-    MAX_DEPTH = 2
-
-    # --------------------------------------------------------
-    # Create crawler
-    # --------------------------------------------------------
-
     crawler = BFSCrawler(
-        max_depth=MAX_DEPTH
+        max_depth=2
     )
-
-    # --------------------------------------------------------
-    # Add starting concept
-    # --------------------------------------------------------
 
     crawler.add_start_concept(
-        START_CONCEPT
+        START_CONCEPT,
+        0
     )
-
-    # --------------------------------------------------------
-    # Start crawling
-    # --------------------------------------------------------
 
     crawler.crawl()

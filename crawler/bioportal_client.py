@@ -1,6 +1,5 @@
 from pathlib import Path
 import os
-
 import requests
 from dotenv import load_dotenv
 
@@ -14,23 +13,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 
-# ============================================================
-# BioPortal Client
-# ============================================================
-
 class BioPortalClient:
     """
     Client for retrieving SNOMED CT concepts and hierarchy
-    information from the BioPortal REST API.
+    information from BioPortal.
     """
 
     BASE_URL = "https://data.bioontology.org"
     ONTOLOGY = "SNOMEDCT"
 
+    # ========================================================
+    # Initialization
+    # ========================================================
+
     def __init__(self):
-        """
-        Initialize the BioPortal API client.
-        """
 
         self.api_key = os.getenv("BIOPORTAL_API_KEY")
 
@@ -51,15 +47,147 @@ class BioPortalClient:
     # Build SNOMED URI
     # ========================================================
 
-    def _get_class_uri(self, concept_id):
-        """
-        Convert a SNOMED CT concept ID into its BioPortal URI.
-        """
+    def build_class_uri(self, concept_id):
 
         return (
-            f"http://purl.bioontology.org/ontology/"
-            f"SNOMEDCT/{concept_id}"
+            "http://purl.bioontology.org/"
+            f"ontology/SNOMEDCT/{concept_id}"
         )
+
+    # ========================================================
+    # Extract Concept ID
+    # ========================================================
+
+    def extract_concept_id(self, item):
+        """
+        Extract a SNOMED CT concept ID from a BioPortal object.
+
+        Handles several possible BioPortal response formats.
+        """
+
+        if not item:
+            return None
+
+        # ----------------------------------------------------
+        # Case 1: dictionary containing @id
+        # ----------------------------------------------------
+
+        if isinstance(item, dict):
+
+            possible_fields = [
+                "@id",
+                "id",
+                "uri",
+                "@about"
+            ]
+
+            for field in possible_fields:
+
+                value = item.get(field)
+
+                if isinstance(value, str):
+
+                    concept_id = self.extract_id_from_uri(
+                        value
+                    )
+
+                    if concept_id:
+                        return concept_id
+
+            # ------------------------------------------------
+            # Case 2: nested links
+            # ------------------------------------------------
+
+            links = item.get("links")
+
+            if isinstance(links, dict):
+
+                for value in links.values():
+
+                    if isinstance(value, str):
+
+                        concept_id = (
+                            self.extract_id_from_uri(
+                                value
+                            )
+                        )
+
+                        if concept_id:
+                            return concept_id
+
+            # ------------------------------------------------
+            # Case 3: nested prefLabel object
+            # ------------------------------------------------
+
+            for key, value in item.items():
+
+                if isinstance(value, dict):
+
+                    concept_id = (
+                        self.extract_concept_id(
+                            value
+                        )
+                    )
+
+                    if concept_id:
+                        return concept_id
+
+        # ----------------------------------------------------
+        # Case 4: raw string URI
+        # ----------------------------------------------------
+
+        if isinstance(item, str):
+
+            return self.extract_id_from_uri(
+                item
+            )
+
+        return None
+
+    # ========================================================
+    # Extract ID from URI
+    # ========================================================
+
+    def extract_id_from_uri(self, uri):
+
+        if not isinstance(uri, str):
+            return None
+
+        prefix = (
+            "http://purl.bioontology.org/"
+            "ontology/SNOMEDCT/"
+        )
+
+        # Normal SNOMED URI
+        if uri.startswith(prefix):
+
+            concept_id = uri[len(prefix):]
+
+            if concept_id.isdigit():
+
+                return concept_id
+
+        # Sometimes BioPortal may return encoded URI
+        if "SNOMEDCT/" in uri:
+
+            concept_id = uri.split(
+                "SNOMEDCT/"
+            )[-1]
+
+            # Remove possible URL fragments
+            concept_id = concept_id.split(
+                "#"
+            )[0]
+
+            concept_id = concept_id.split(
+                "?"
+            )[0]
+
+            if concept_id.isdigit():
+
+                return concept_id
+
+        return None
 
     # ========================================================
     # Get Concept
@@ -67,13 +195,10 @@ class BioPortalClient:
 
     def get_concept(self, concept_id):
         """
-        Retrieve a SNOMED CT concept from BioPortal.
-
-        Returns:
-            dict | None
+        Fetch a SNOMED CT concept using its concept ID.
         """
 
-        class_uri = self._get_class_uri(
+        class_uri = self.build_class_uri(
             concept_id
         )
 
@@ -100,18 +225,11 @@ class BioPortalClient:
             )
 
             if response.status_code == 200:
+
                 return response.json()
 
-            if response.status_code == 404:
-
-                print(
-                    f"⚠️ Concept not found: {concept_id}"
-                )
-
-                return None
-
             print(
-                "BioPortal Error:",
+                "Error:",
                 response.text
             )
 
@@ -126,35 +244,98 @@ class BioPortalClient:
             return None
 
     # ========================================================
+    # Search Concept
+    # ========================================================
+
+    def search_concept(self, search_term):
+        """
+        Search BioPortal for SNOMED CT concepts by name.
+        """
+
+        url = (
+            f"{self.BASE_URL}/search"
+        )
+
+        params = {
+            "q": search_term,
+            "ontologies": self.ONTOLOGY,
+            "include": "prefLabel,synonym",
+            "pagesize": 10
+        }
+
+        try:
+
+            response = self.session.get(
+                url,
+                params=params,
+                timeout=30
+            )
+
+            print(
+                f"Search Status Code: "
+                f"{response.status_code}"
+            )
+
+            if response.status_code != 200:
+
+                print(
+                    "Search Error:",
+                    response.text
+                )
+
+                return []
+
+            data = response.json()
+
+            collection = data.get(
+                "collection",
+                []
+            )
+
+            results = []
+
+            for item in collection:
+
+                concept_id = (
+                    self.extract_concept_id(
+                        item
+                    )
+                )
+
+                if not concept_id:
+                    continue
+
+                label = (
+                    item.get("prefLabel")
+                    or item.get("label")
+                    or concept_id
+                )
+
+                results.append({
+                    "concept_id": concept_id,
+                    "name": label
+                })
+
+            return results
+
+        except requests.exceptions.RequestException as e:
+
+            print(
+                f"Search Request Error: {e}"
+            )
+
+            return []
+
+    # ========================================================
     # Get Parents
     # ========================================================
 
     def get_parents(self, concept_id):
         """
-        Retrieve direct parent concepts of a SNOMED CT
-        concept.
-
-        IMPORTANT:
-        BioPortal's /parents endpoint returns a LIST directly.
-
-        Example:
-
-        [
-            {
-                "@id": "...",
-                "prefLabel": "Pneumonitis"
-            },
-            {
-                "@id": "...",
-                "prefLabel": "Infectious disease of lung"
-            }
-        ]
-
-        Returns:
-            list
+        Retrieve direct parent concepts from BioPortal.
         """
 
-        class_uri = self._get_class_uri(
+        class_uri = self.build_class_uri(
             concept_id
         )
 
@@ -181,64 +362,140 @@ class BioPortalClient:
                 f"{response.status_code}"
             )
 
+            if response.status_code != 200:
+
+                print(
+                    "Parent Error:",
+                    response.text
+                )
+
+                return []
+
+            data = response.json()
+
             # ------------------------------------------------
-            # Successful request
+            # BioPortal commonly returns a list directly.
             # ------------------------------------------------
 
-            if response.status_code == 200:
+            if isinstance(data, list):
 
-                data = response.json()
+                collection = data
 
-                # BioPortal is returning a list directly.
-                if isinstance(data, list):
-                    return data
+            # ------------------------------------------------
+            # Some responses are wrapped in "collection".
+            # ------------------------------------------------
 
-                # ------------------------------------------------
-                # Extra protection in case BioPortal returns
-                # a dictionary in another response format.
-                # ------------------------------------------------
+            elif isinstance(data, dict):
 
-                if isinstance(data, dict):
+                collection = data.get(
+                    "collection",
+                    []
+                )
+
+                # Some BioPortal responses may use
+                # "results".
+                if not collection:
 
                     collection = data.get(
-                        "collection",
+                        "results",
                         []
                     )
 
-                    if isinstance(collection, list):
-                        return collection
+            else:
 
-                print(
-                    "⚠️ Unexpected parent response format:"
+                collection = []
+
+            parents = []
+
+            for parent in collection:
+
+                # --------------------------------------------
+                # Extract concept ID
+                # --------------------------------------------
+
+                parent_id = (
+                    self.extract_concept_id(
+                        parent
+                    )
                 )
 
-                print(data)
+                # --------------------------------------------
+                # If extraction failed, try the parent
+                # object's @id directly.
+                # --------------------------------------------
 
-                return []
+                if not parent_id:
 
-            # ------------------------------------------------
-            # Not found
-            # ------------------------------------------------
+                    if isinstance(parent, dict):
 
-            if response.status_code == 404:
+                        raw_id = parent.get(
+                            "@id"
+                        )
 
-                print(
-                    f"⚠️ Parents not found for: "
-                    f"{concept_id}"
-                )
+                        if raw_id:
 
-                return []
+                            parent_id = (
+                                self.extract_id_from_uri(
+                                    raw_id
+                                )
+                            )
 
-            # ------------------------------------------------
-            # Other API error
-            # ------------------------------------------------
+                if not parent_id:
 
-            print(
-                "BioPortal Parent Error:",
-                response.text
-            )
+                    print(
+                        "⚠️ Could not determine "
+                        "parent concept ID."
+                    )
 
-            return []
+                    continue
+
+                # --------------------------------------------
+                # Extract label
+                # --------------------------------------------
+
+                label = None
+
+                if isinstance(parent, dict):
+
+                    label = (
+                        parent.get("prefLabel")
+                        or parent.get("label")
+                        or parent.get("name")
+                    )
+
+                if not label:
+
+                    # If label isn't included in the
+                    # parent response, retrieve it
+                    # directly using the ID.
+
+                    parent_concept = (
+                        self.get_concept(
+                            parent_id
+                        )
+                    )
+
+                    if parent_concept:
+
+                        label = (
+                            parent_concept.get(
+                                "prefLabel"
+                            )
+                            or parent_concept.get(
+                                "label"
+                            )
+                        )
+
+                if not label:
+
+                    label = parent_id
+
+                parents.append({
+                    "concept_id": parent_id,
+                    "name": label
+                })
+
+            return parents
 
         except requests.exceptions.RequestException as e:
 
@@ -249,82 +506,103 @@ class BioPortalClient:
             return []
 
     # ========================================================
-    # Extract Concept ID
+    # Get Children
     # ========================================================
 
-    def extract_concept_id(self, uri):
+    def get_children(self, concept_id):
         """
-        Extract the SNOMED CT concept ID from a BioPortal URI.
+        Retrieve direct child concepts.
 
-        Example:
-
-        http://purl.bioontology.org/ontology/SNOMEDCT/205237003
-
-        becomes:
-
-        205237003
+        This method is included for future graph exploration.
         """
 
-        if not uri:
-            return None
-
-        return uri.rstrip("/").split("/")[-1]
-
-    # ========================================================
-    # Get Simplified Parent Information
-    # ========================================================
-
-    def get_parent_concepts(self, concept_id):
-        """
-        Retrieve direct parents and return them in a
-        simplified format.
-
-        Returns:
-
-        [
-            {
-                "id": "205237003",
-                "name": "Pneumonitis"
-            }
-        ]
-        """
-
-        parents = self.get_parents(
+        class_uri = self.build_class_uri(
             concept_id
         )
 
-        simplified_parents = []
+        encoded_uri = requests.utils.quote(
+            class_uri,
+            safe=""
+        )
 
-        for parent in parents:
+        url = (
+            f"{self.BASE_URL}/ontologies/"
+            f"{self.ONTOLOGY}/classes/"
+            f"{encoded_uri}/descendants"
+        )
 
-            if not isinstance(parent, dict):
-                continue
+        try:
 
-            # BioPortal commonly uses @id.
-            parent_uri = (
-                parent.get("@id")
-                or parent.get("id")
+            response = self.session.get(
+                url,
+                timeout=30
             )
 
-            parent_id = self.extract_concept_id(
-                parent_uri
+            if response.status_code != 200:
+
+                print(
+                    f"Children Status Code: "
+                    f"{response.status_code}"
+                )
+
+                return []
+
+            data = response.json()
+
+            if isinstance(data, list):
+
+                collection = data
+
+            elif isinstance(data, dict):
+
+                collection = data.get(
+                    "collection",
+                    []
+                )
+
+            else:
+
+                collection = []
+
+            children = []
+
+            for child in collection:
+
+                child_id = (
+                    self.extract_concept_id(
+                        child
+                    )
+                )
+
+                if not child_id:
+                    continue
+
+                if isinstance(child, dict):
+
+                    label = (
+                        child.get("prefLabel")
+                        or child.get("label")
+                        or child_id
+                    )
+
+                else:
+
+                    label = child_id
+
+                children.append({
+                    "concept_id": child_id,
+                    "name": label
+                })
+
+            return children
+
+        except requests.exceptions.RequestException as e:
+
+            print(
+                f"Children Request Error: {e}"
             )
 
-            if not parent_id:
-                continue
-
-            parent_name = (
-                parent.get("prefLabel")
-                or parent.get("name")
-                or "Unknown"
-            )
-
-            simplified_parents.append({
-                "id": parent_id,
-                "name": parent_name
-            })
-
-        return simplified_parents
+            return []
 
 
 # ============================================================
@@ -340,7 +618,7 @@ if __name__ == "__main__":
     client = BioPortalClient()
 
     # --------------------------------------------------------
-    # Test concept
+    # Test Concept
     # --------------------------------------------------------
 
     concept_id = "233604007"
@@ -360,25 +638,17 @@ if __name__ == "__main__":
         )
 
         print(
-            concept.get("prefLabel")
-        )
-
-    else:
-
-        print(
-            "\n❌ Concept could not be retrieved."
+            concept.get(
+                "prefLabel"
+            )
         )
 
     # --------------------------------------------------------
-    # Test parents
+    # Test Parents
     # --------------------------------------------------------
 
     print(
-        "\n" + "=" * 60
-    )
-
-    print(
-        f"Fetching parents of: {concept_id}"
+        f"\nFetching parents of: {concept_id}"
     )
 
     parents = client.get_parents(
@@ -391,30 +661,87 @@ if __name__ == "__main__":
 
     for parent in parents:
 
-        if not isinstance(parent, dict):
-            continue
+        print("\n---")
 
-        parent_uri = (
-            parent.get("@id")
-            or parent.get("id")
+        print(
+            "Label :",
+            parent["name"]
         )
 
-        parent_id = client.extract_concept_id(
-            parent_uri
+        print(
+            "ID    :",
+            parent["concept_id"]
         )
 
-        parent_name = (
-            parent.get("prefLabel")
-            or parent.get("name")
-            or "Unknown"
-        )
+    # --------------------------------------------------------
+    # Test Diabetes
+    # --------------------------------------------------------
+
+    diabetes_id = "73211009"
+
+    print("\n" + "=" * 60)
+    print("Testing Diabetes mellitus")
+    print("=" * 60)
+
+    print(
+        f"\nFetching parents of: {diabetes_id}"
+    )
+
+    diabetes_parents = client.get_parents(
+        diabetes_id
+    )
+
+    print(
+        f"\nFound "
+        f"{len(diabetes_parents)} parent(s)."
+    )
+
+    for parent in diabetes_parents:
 
         print("\n---")
 
         print(
-            f"Label : {parent_name}"
+            "Label :",
+            parent["name"]
         )
 
         print(
-            f"ID    : {parent_id}"
+            "ID    :",
+            parent["concept_id"]
+        )
+
+    # --------------------------------------------------------
+    # Test Search
+    # --------------------------------------------------------
+
+    print("\n" + "=" * 60)
+    print("Testing Concept Search")
+    print("=" * 60)
+
+    search_term = "Diabetes mellitus"
+
+    print(
+        f"\nSearching for: {search_term}"
+    )
+
+    results = client.search_concept(
+        search_term
+    )
+
+    print(
+        f"\nFound {len(results)} result(s)."
+    )
+
+    for result in results:
+
+        print("\n---")
+
+        print(
+            "Label :",
+            result["name"]
+        )
+
+        print(
+            "ID    :",
+            result["concept_id"]
         )
