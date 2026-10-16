@@ -1,5 +1,27 @@
+import logging
+
 import streamlit as st
+
 from agent.query_processor import QueryProcessor
+from crawler.bioportal_client import BioPortalConfigurationError
+from database.neo4j_connection import Neo4jConfigurationError
+from ui.view_model import (
+    ancestor_note,
+    count_label,
+    coverage_notice,
+    error_details,
+    error_message,
+    escape,
+    extract_concept_id,
+    extract_concept_name,
+    extract_relationships,
+    normalize_concepts,
+    redact,
+    resolution_note,
+    safe_list,
+)
+
+logging.basicConfig(level=logging.WARNING)
 
 
 # ============================================================
@@ -365,6 +387,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+st.caption(
+    "Prototype status: concept resolution, hierarchy retrieval and display "
+    "are deterministic. LLM-generated explanations are planned and not yet "
+    "implemented."
+)
+
 
 # ============================================================
 # SIDEBAR
@@ -380,6 +408,15 @@ with st.sidebar:
         max_value=5,
         value=2,
         help="Number of SNOMED CT hierarchy levels to dynamically retrieve.",
+    )
+
+    fetch_children = st.checkbox(
+        "Retrieve direct children from BioPortal",
+        value=True,
+        help=(
+            "When off, only children already stored in the local graph "
+            "are shown, and an empty list does not mean there are none."
+        ),
     )
 
     st.divider()
@@ -403,7 +440,7 @@ with st.sidebar:
         <div class="pipeline-step">🗄️ Neo4j Knowledge Graph</div>
         <div style="text-align:center; color:#ffffff;">↓</div>
 
-        <div class="pipeline-step">📊 Explainable Result</div>
+        <div class="pipeline-step">📊 Hierarchy Result + Coverage</div>
         """,
         unsafe_allow_html=True,
     )
@@ -456,164 +493,8 @@ explore_button = st.button(
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
-
-def safe_list(value):
-    """
-    Make sure a result field is always returned as a list.
-    """
-    if value is None:
-        return []
-
-    if isinstance(value, list):
-        return value
-
-    return []
-
-
-def extract_concept_id(result):
-    """
-    Robustly extract the SNOMED CT concept ID.
-
-    Supports several possible result structures.
-    """
-
-    if not isinstance(result, dict):
-        return "Unknown"
-
-    # Most likely locations
-    possible_keys = [
-        "concept_id",
-        "id",
-        "snomed_id",
-        "snomed_ct_id",
-        "conceptId",
-    ]
-
-    for key in possible_keys:
-        value = result.get(key)
-
-        if value not in [None, "", "Unknown"]:
-            return str(value)
-
-    # Nested concept object
-    concept = result.get("concept")
-
-    if isinstance(concept, dict):
-
-        for key in possible_keys:
-
-            value = concept.get(key)
-
-            if value not in [None, "", "Unknown"]:
-                return str(value)
-
-    return "Unknown"
-
-
-def extract_concept_name(result):
-    """
-    Robustly extract the concept name.
-    """
-
-    if not isinstance(result, dict):
-        return "Unknown"
-
-    possible_keys = [
-        "concept_name",
-        "name",
-        "preferred_label",
-        "label",
-    ]
-
-    for key in possible_keys:
-
-        value = result.get(key)
-
-        if value not in [None, "", "Unknown"]:
-            return str(value)
-
-    concept = result.get("concept")
-
-    if isinstance(concept, dict):
-
-        for key in possible_keys:
-
-            value = concept.get(key)
-
-            if value not in [None, "", "Unknown"]:
-                return str(value)
-
-    return "Unknown"
-
-
-def extract_relationships(result):
-    """
-    Extract relationship information if available.
-    """
-
-    if not isinstance(result, dict):
-        return []
-
-    relationships = result.get("relationships")
-
-    if isinstance(relationships, list):
-        return relationships
-
-    return []
-
-
-def normalize_concepts(items):
-    """
-    Normalize parent/child concept objects.
-    """
-
-    normalized = []
-
-    if not isinstance(items, list):
-        return normalized
-
-    seen = set()
-
-    for item in items:
-
-        if isinstance(item, dict):
-
-            concept_id = (
-                item.get("concept_id")
-                or item.get("id")
-                or item.get("snomed_id")
-                or item.get("snomed_ct_id")
-                or "Unknown"
-            )
-
-            name = (
-                item.get("name")
-                or item.get("concept_name")
-                or item.get("preferred_label")
-                or item.get("label")
-                or "Unknown"
-            )
-
-        else:
-
-            concept_id = "Unknown"
-            name = str(item)
-
-        unique_key = f"{concept_id}|{name}"
-
-        if unique_key in seen:
-            continue
-
-        seen.add(unique_key)
-
-        normalized.append(
-            {
-                "concept_id": str(concept_id),
-                "name": str(name),
-            }
-        )
-
-    return normalized
+# Moved to ui/view_model.py (unchanged) so they can be unit-tested
+# without starting Streamlit. Imported at the top of this file.
 
 
 # ============================================================
@@ -635,27 +516,48 @@ if explore_button:
             ):
 
                 processor = QueryProcessor(
-                    expansion_depth=expansion_depth
+                    expansion_depth=expansion_depth,
+                    fetch_children=fetch_children,
                 )
 
                 result = processor.process_query(
                     query.strip()
                 )
 
-            st.session_state["query_result"] = result
-            st.session_state["last_query"] = query.strip()
+        except (Neo4jConfigurationError, BioPortalConfigurationError) as error:
 
-            st.success(
-                "Concept exploration completed successfully."
-            )
+            st.session_state.pop("query_result", None)
+            st.error(error_message({"error_type": "configuration_error"}))
+            st.caption(redact(error))
 
         except Exception as error:
 
+            st.session_state.pop("query_result", None)
             st.error(
                 "An error occurred while processing the query."
             )
-
             st.exception(error)
+
+        else:
+
+            st.session_state["last_query"] = query.strip()
+
+            if result.get("success"):
+
+                st.session_state["query_result"] = result
+
+                st.success(
+                    "Concept exploration completed."
+                )
+
+            else:
+
+                st.session_state.pop("query_result", None)
+
+                st.error(error_message(result))
+
+                with st.expander("Details"):
+                    st.write(error_details(result))
 
 
 # ============================================================
@@ -691,6 +593,12 @@ if "query_result" in st.session_state:
         else []
     )
 
+    ancestors = normalize_concepts(
+        result.get("ancestors", [])
+        if isinstance(result, dict)
+        else []
+    )
+
     relationships = extract_relationships(result)
 
 
@@ -703,17 +611,34 @@ if "query_result" in st.session_state:
         <div class="concept-card">
 
         <div class="concept-name">
-        🧬 {concept_name}
+        🧬 {escape(concept_name)}
         </div>
 
         <div class="concept-id">
-        SNOMED CT ID: {concept_id}
+        SNOMED CT ID: {escape(concept_id)}
         </div>
 
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    note = resolution_note(result)
+
+    if note:
+        st.caption(note)
+
+    for warning_text in safe_list(result.get("warnings")):
+        st.warning(warning_text)
+
+    candidates = normalize_concepts(result.get("candidates", []))
+
+    if (result.get("resolution") or {}).get("ambiguous") and candidates:
+
+        with st.expander("Other BioPortal matches"):
+
+            for candidate in candidates:
+                st.write(f"{candidate['name']} ({candidate['concept_id']})")
 
 
     # ========================================================
@@ -734,7 +659,7 @@ if "query_result" in st.session_state:
             </div>
 
             <div class="stat-label">
-            Direct Parents
+            {escape(count_label(result, "parents"))}
             </div>
 
             </div>
@@ -754,7 +679,7 @@ if "query_result" in st.session_state:
             </div>
 
             <div class="stat-label">
-            Direct Children
+            {escape(count_label(result, "children"))}
             </div>
 
             </div>
@@ -770,11 +695,11 @@ if "query_result" in st.session_state:
             <div class="stat-card">
 
             <div class="stat-number">
-            {len(parents) + len(children)}
+            {len(ancestors)}
             </div>
 
             <div class="stat-label">
-            Direct Relationships
+            Ancestors Retrieved
             </div>
 
             </div>
@@ -795,32 +720,29 @@ if "query_result" in st.session_state:
     )
 
 
-    if parents:
+    for parent in parents:
 
-        for parent in parents:
+        st.markdown(
+            f"""
+            <div class="concept-card">
 
-            st.markdown(
-                f"""
-                <div class="concept-card">
+            <strong>{escape(parent["name"])}</strong>
 
-                <strong>{parent["name"]}</strong>
+            <br>
 
-                <br>
+            <span class="concept-id">
+            SNOMED CT ID: {escape(parent["concept_id"])}
+            </span>
 
-                <span class="concept-id">
-                SNOMED CT ID: {parent["concept_id"]}
-                </span>
-
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    else:
-
-        st.info(
-            "No direct parents found in the currently loaded graph."
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
+
+    notice = coverage_notice(result, "parents")
+
+    if notice:
+        getattr(st, notice[0])(notice[1])
 
 
     # ========================================================
@@ -835,32 +757,29 @@ if "query_result" in st.session_state:
     )
 
 
-    if children:
+    for child in children:
 
-        for child in children:
+        st.markdown(
+            f"""
+            <div class="concept-card">
 
-            st.markdown(
-                f"""
-                <div class="concept-card">
+            <strong>{escape(child["name"])}</strong>
 
-                <strong>{child["name"]}</strong>
+            <br>
 
-                <br>
+            <span class="concept-id">
+            SNOMED CT ID: {escape(child["concept_id"])}
+            </span>
 
-                <span class="concept-id">
-                SNOMED CT ID: {child["concept_id"]}
-                </span>
-
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    else:
-
-        st.info(
-            "No direct children found in the currently loaded graph."
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
+
+    notice = coverage_notice(result, "children")
+
+    if notice:
+        getattr(st, notice[0])(notice[1])
 
 
     # ========================================================
@@ -903,11 +822,11 @@ if "query_result" in st.session_state:
                     f"""
                     <div class="relationship-card">
 
-                    <strong>{source}</strong>
+                    <strong>{escape(source)}</strong>
                     &nbsp; → &nbsp;
-                    <strong>{relationship_type}</strong>
+                    <strong>{escape(relationship_type)}</strong>
                     &nbsp; → &nbsp;
-                    <strong>{target}</strong>
+                    <strong>{escape(target)}</strong>
 
                     </div>
                     """,
@@ -941,7 +860,7 @@ if "query_result" in st.session_state:
                 font-size:1.05rem;
                 margin-bottom:0.5rem;
             ">
-            {concept_name}
+            {escape(concept_name)}
             </div>
             """,
             unsafe_allow_html=True,
@@ -957,7 +876,23 @@ if "query_result" in st.session_state:
 
     else:
 
-        st.info("No hierarchy information available.")
+        st.info("No parent hierarchy to summarise (see the Direct Parents section).")
+
+    if ancestors:
+
+        st.markdown("**Ancestors in the retrieved subgraph**")
+
+        st.write(
+            ", ".join(
+                f"{ancestor['name']} ({ancestor['concept_id']})"
+                for ancestor in ancestors
+            )
+        )
+
+    note = ancestor_note(result)
+
+    if note:
+        st.caption(note)
 
 
     # ========================================================

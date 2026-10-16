@@ -1,0 +1,127 @@
+{
+  "concepts": {
+    "100": {
+      "ancestors": [],
+      "children": [
+        "200",
+        "300"
+      ],
+      "children_complete": true,
+      "concept_id": "100",
+      "label": "Root concept",
+      "parents": []
+    },
+    "200": {
+      "ancestors": [
+        "100"
+      ],
+      "children": [
+        "400"
+      ],
+      "children_complete": true,
+      "concept_id": "200",
+      "label": "Finding A",
+      "parents": [
+        "100"
+      ]
+    },
+    "300": {
+      "ancestors": [
+        "100"
+      ],
+      "children": [
+        "400"
+      ],
+      "children_complete": true,
+      "concept_id": "300",
+      "label": "Finding B",
+      "parents": [
+        "100"
+      ]
+    },
+    "400": {
+      "ancestors": [
+        "100",
+        "200",
+        "300"
+      ],
+      "children": [
+        "500",
+        "600"
+      ],
+      "children_complete": true,
+      "concept_id": "400",
+      "label": "Disorder AB",
+      "parents": [
+        "200",
+        "300"
+      ]
+    },
+    "500": {
+      "ancestors": [
+        "100",
+        "200",
+        "300",
+        "400"
+      ],
+      "children": [
+        "700"
+      ],
+      "children_complete": true,
+      "concept_id": "500",
+      "label": "Disorder AB type 1",
+      "parents": [
+        "400"
+      ]
+    },
+    "600": {
+      "ancestors": [
+        "100",
+        "200",
+        "300",
+        "400"
+      ],
+      "children": [],
+      "children_complete": true,
+      "concept_id": "600",
+      "label": "Disorder AB type 2",
+      "parents": [
+        "400"
+      ]
+    },
+    "700": {
+      "ancestors": [
+        "100",
+        "200",
+        "300",
+        "400",
+        "500"
+      ],
+      "children": [],
+      "children_complete": true,
+      "concept_id": "700",
+      "label": "Disorder AB type 1 variant",
+      "parents": [
+        "500"
+      ]
+    }
+  },
+  "failures": {},
+  "labels": {
+    "100": "Root concept",
+    "200": "Finding A",
+    "300": "Finding B",
+    "400": "Disorder AB",
+    "500": "Disorder AB type 1",
+    "600": "Disorder AB type 2",
+    "700": "Disorder AB type 1 variant"
+  },
+  "notes": "SYNTHETIC test data: hand-written 7-node hierarchy from tests/fakes.py. Not SNOMED CT content and not a real benchmark.",
+  "ontology": "SNOMEDCT",
+  "released": null,
+  "retrieved_at": "2026-10-17T00:00:00+00:00",
+  "schema_version": "1.0",
+  "source": "synthetic (tests/fakes.py)",
+  "synthetic": true,
+  "version": "SYNTHETIC-TEST"
+}

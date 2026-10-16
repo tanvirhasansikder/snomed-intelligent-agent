@@ -1,0 +1,3 @@
+# Gold snapshots contain SNOMED CT content (UMLS licence). Keep them out of Git.
+*
+!.gitignore
