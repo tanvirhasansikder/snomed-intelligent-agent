@@ -39,4 +39,5 @@ def build_client(spec):
         json_mode=spec.get("json_mode", False),
         seed=spec.get("seed"),
         extra_body=spec.get("extra_body"),
+        max_retries=spec.get("max_retries", 4),
     )

@@ -117,6 +117,43 @@ class OpenAICompatibleClient:
         payload.update(self.extra_body)
         return payload
 
+    @staticmethod
+    def _daily_quota_exhausted(response):
+        """True if a 429 says a per-day quota is used up (e.g. Gemini's ...PerDay... quota IDs)."""
+        try:
+            text = str(response.text or "")
+        except Exception:  # noqa: BLE001
+            return False
+        return "PerDay" in text or "per day" in text.lower()
+
+    def _error_detail(self, response, limit=600):
+        """Start of the provider's error body (helps diagnose 4xx), with any key removed."""
+        try:
+            text = " ".join(str(response.text or "").split())
+        except Exception:  # noqa: BLE001 - diagnostics must never raise
+            return ""
+        if self._api_key:
+            text = text.replace(self._api_key, "<hidden>")
+        return f": {text[:limit]}" if text else ""
+
+    def list_models(self):
+        """
+        Model identifiers this key can use (GET {base_url}/models, part of the
+        OpenAI-compatible API). Raises LLMError on failure.
+        """
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        try:
+            response = self.session.get(f"{self.base_url}/models", headers=headers, timeout=self.timeout)
+        except requests.exceptions.RequestException as exc:
+            raise LLMError(f"{self.name}: model list failed ({type(exc).__name__})") from None
+        if response.status_code != 200:
+            raise LLMError(f"{self.name}: model list failed (HTTP {response.status_code}{self._error_detail(response)})")
+        try:
+            data = response.json().get("data", [])
+            return sorted(m["id"] for m in data if isinstance(m, dict) and m.get("id"))
+        except (ValueError, AttributeError, TypeError):
+            raise LLMError(f"{self.name}: unexpected model list format") from None
+
     def _wait_for_rate_limit(self):
         if self.min_interval:
             elapsed = time.monotonic() - self._last_call
@@ -165,7 +202,10 @@ class OpenAICompatibleClient:
                 except (ValueError, KeyError, IndexError, TypeError):
                     raise LLMError(f"{self.name}: unexpected response format") from None
 
-            problem = f"HTTP {response.status_code}"
+            problem = f"HTTP {response.status_code}{self._error_detail(response)}"
+            if response.status_code == 429 and self._daily_quota_exhausted(response):
+                # Retrying cannot help until the quota resets; stop instead of wasting requests.
+                raise LLMError(f"{self.name}: daily quota exhausted ({problem})")
             if response.status_code in self.RETRY_STATUS and attempt < self.max_retries:
                 retry_after = (response.headers or {}).get("Retry-After")
                 try:
