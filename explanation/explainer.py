@@ -1,9 +1,14 @@
 """
 Deterministic verification of hierarchy claims (no LLM involved).
 
-A *claim* says that ``object_id`` is a direct parent or an ancestor of
-``subject_id`` (i.e. subject IS_A object, directly or transitively). The
-verifier labels each claim against
+A *claim* is one of
+
+* ``direct_parent(subject, object)``  subject IS_A object (one step)
+* ``ancestor(subject, object)``       subject IS_A object (one or more steps)
+* ``no_children(subject)``            subject has no direct children (a leaf)
+* ``no_parents(subject)``             subject has no parents (top of hierarchy)
+
+The verifier labels each claim against
 
 * the retrieved subgraph (``SubgraphEvidence``), which may be incomplete, and
 * optionally a reference hierarchy (``ReferenceHierarchy``, e.g. a frozen
@@ -30,7 +35,11 @@ from dataclasses import dataclass
 
 DIRECT_PARENT = "direct_parent"
 ANCESTOR = "ancestor"
-RELATIONS = (DIRECT_PARENT, ANCESTOR)
+NO_CHILDREN = "no_children"
+NO_PARENTS = "no_parents"
+BINARY_RELATIONS = (DIRECT_PARENT, ANCESTOR)
+UNARY_RELATIONS = (NO_CHILDREN, NO_PARENTS)
+RELATIONS = BINARY_RELATIONS + UNARY_RELATIONS
 
 SUPPORTED = "supported_by_subgraph"
 TRUE_NOT_RETRIEVED = "true_not_retrieved"
@@ -50,13 +59,17 @@ def _is_concept_id(value):
 class HierarchyClaim:
     subject_id: str
     relation: str
-    object_id: str
+    object_id: str = None
 
     def __post_init__(self):
         if self.relation not in RELATIONS:
             raise ValueError(f"relation must be one of {RELATIONS}")
-        if not _is_concept_id(self.subject_id) or not _is_concept_id(self.object_id):
-            raise ValueError("subject_id and object_id must be numeric concept ID strings")
+        if not _is_concept_id(self.subject_id):
+            raise ValueError("subject_id must be a numeric concept ID string")
+        if self.relation in BINARY_RELATIONS and not _is_concept_id(self.object_id):
+            raise ValueError("object_id must be a numeric concept ID string")
+        if self.relation in UNARY_RELATIONS and self.object_id is not None:
+            raise ValueError(f"{self.relation} takes no object")
 
     def as_dict(self):
         return {"subject": self.subject_id, "relation": self.relation, "object": self.object_id}
@@ -72,7 +85,15 @@ def parse_claims(records):
         if not isinstance(record, dict):
             raise ValueError(f"claim {index} is not an object")
         try:
-            claims.append(HierarchyClaim(str(record["subject"]), record["relation"], str(record["object"])))
+            relation = record["relation"]
+            obj = record.get("object")
+            if relation in BINARY_RELATIONS:
+                if obj is None:
+                    raise KeyError("'object'")
+                obj = str(obj)
+            elif obj in ("", "null", "None"):
+                obj = None
+            claims.append(HierarchyClaim(str(record["subject"]), relation, obj))
         except KeyError as exc:
             raise ValueError(f"claim {index} is missing {exc}") from None
     return claims
@@ -83,8 +104,10 @@ class _Hierarchy:
 
     def __init__(self, edges):
         self.parents = {}
+        self.children = {}
         for child, parent in edges:
             self.parents.setdefault(child, set()).add(parent)
+            self.children.setdefault(parent, set()).add(child)
 
     def has_edge(self, child, parent):
         return parent in self.parents.get(child, ())
@@ -103,17 +126,19 @@ class SubgraphEvidence(_Hierarchy):
     """
     What was actually retrieved.
 
-    nodes             concept_id -> label
-    edges             (child_id, parent_id) IS_A edges
-    parents_complete  IDs whose full direct-parent list was retrieved
+    nodes              concept_id -> label
+    edges              (child_id, parent_id) IS_A edges
+    parents_complete   IDs whose full direct-parent list was retrieved
+    children_complete  IDs whose full direct-child list was retrieved
     """
 
-    def __init__(self, nodes, edges, parents_complete=()):
+    def __init__(self, nodes, edges, parents_complete=(), children_complete=()):
         edges = set(edges)
         super().__init__(edges)
         self.nodes = dict(nodes)
         self.edges = edges
         self.parents_complete = set(parents_complete)
+        self.children_complete = set(children_complete)
 
     def closure_complete(self, concept_id):
         """True if every concept on every upward path has a complete parent list."""
@@ -138,11 +163,13 @@ class SubgraphEvidence(_Hierarchy):
         for child in result.get("children") or []:
             nodes[child["concept_id"]] = child.get("name")
             edges.add((child["concept_id"], focal))
-        complete = set()
-        parents_coverage = (result.get("coverage") or {}).get("parents") or {}
-        if focal and parents_coverage.get("status") == "complete":
+        complete, children_complete = set(), set()
+        coverage = result.get("coverage") or {}
+        if focal and (coverage.get("parents") or {}).get("status") == "complete":
             complete.add(focal)
-        return cls(nodes, edges, complete)
+        if focal and (coverage.get("children") or {}).get("status") == "complete":
+            children_complete.add(focal)
+        return cls(nodes, edges, complete, children_complete)
 
 
 class ReferenceHierarchy(_Hierarchy):
@@ -154,10 +181,14 @@ class ReferenceHierarchy(_Hierarchy):
     every intermediate parent list being present.
     """
 
-    def __init__(self, edges, nodes=None, ancestor_sets=None):
+    def __init__(self, edges, nodes=None, ancestor_sets=None, children_complete=(), parents_complete=None):
         edges = set(edges)
         super().__init__(edges)
         self.ancestor_sets = {k: set(v) for k, v in (ancestor_sets or {}).items()}
+        #: IDs whose child list in the reference is complete (needed to judge no_children).
+        self.children_complete = set(children_complete)
+        #: IDs whose parent list is complete; None means "every node with known parents".
+        self.parents_complete = None if parents_complete is None else set(parents_complete)
         known = set(nodes or ())
         for child, parent in edges:
             known.update((child, parent))
@@ -172,11 +203,47 @@ class ReferenceHierarchy(_Hierarchy):
         return candidate in self.ancestors(concept_id)
 
 
+def _verify_unary(claim, evidence, reference):
+    subject = claim.subject_id
+    if claim.relation == NO_CHILDREN:
+        has_link = bool(evidence.children.get(subject))
+        complete = subject in evidence.children_complete
+    else:
+        has_link = bool(evidence.parents.get(subject))
+        complete = subject in evidence.parents_complete
+
+    if complete and not has_link:
+        return SUPPORTED
+    if has_link and reference is None:
+        return CONTRADICTED
+
+    if reference is not None:
+        if claim.relation == NO_CHILDREN:
+            if reference.children.get(subject):
+                return FALSE_IN_REFERENCE
+            if subject in reference.children_complete:
+                return TRUE_NOT_RETRIEVED
+            return INSUFFICIENT
+        if reference.parents.get(subject):
+            return FALSE_IN_REFERENCE
+        known = reference.parents_complete
+        if known is None or subject in known:
+            return TRUE_NOT_RETRIEVED
+        return INSUFFICIENT
+
+    return INSUFFICIENT
+
+
 def verify_claim(claim, evidence, reference=None):
     """Return one label from LABELS for ``claim``."""
 
-    if reference is not None and (claim.subject_id not in reference.nodes or claim.object_id not in reference.nodes):
-        return UNKNOWN_IDENTIFIER
+    if reference is not None:
+        ids = [claim.subject_id] + ([claim.object_id] if claim.object_id is not None else [])
+        if any(i not in reference.nodes for i in ids):
+            return UNKNOWN_IDENTIFIER
+
+    if claim.relation in UNARY_RELATIONS:
+        return _verify_unary(claim, evidence, reference)
 
     if claim.relation == DIRECT_PARENT:
         supported = evidence.has_edge(claim.subject_id, claim.object_id)

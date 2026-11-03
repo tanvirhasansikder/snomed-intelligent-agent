@@ -1,0 +1,121 @@
+% Manuscript draft. Status: methods drafted from protocol v1.1; NO RESULTS YET.
+% Every red \pending{...} marks content that can only be written after the
+% main experiment has been run. Do not replace a placeholder with an
+% expected or illustrative number.
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\pending}[1]{\textcolor{red}{[PENDING: #1]}}
+\newcommand{\sct}{SNOMED~CT}
+
+\title{Coverage-aware grounding: measuring parametric fill-in when large language models explain \sct{} hierarchy from partial, on-demand retrieved subgraphs}
+\author{Md. Tanvir Hasan Sikder\\
+Department of Electrical and Computer Engineering, North South University, Dhaka, Bangladesh\\
+\pending{supervisor and co-authors; confirm department name}}
+\date{Draft --- \today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent\textbf{Objective:} Systems that retrieve clinical terminology on demand give large language models (LLMs) a partial view of the hierarchy. We measure how LLMs behave when that view is incomplete, and whether stating which parts of the evidence are complete changes their claims.
+\textbf{Methods:} We sampled \pending{N} concepts from six \sct{} top-level hierarchies through BioPortal and froze all responses. The project's own on-demand crawler produced evidence under five retrieval conditions, from none to the full ancestor closure, rendered either as plain IS\_A edges or with per-concept coverage annotations. Three LLMs answered five task types. Every hierarchical claim was labelled deterministically as supported by the evidence, true but not retrieved, or false, and each item's evidence sufficiency was computed from retrieval provenance.
+\textbf{Results:} \pending{main findings for H2a, H3a, H3b with effect sizes and confidence intervals}.
+\textbf{Conclusion:} \pending{to be written from results}.
+\end{abstract}
+
+\noindent\textbf{Keywords:} SNOMED CT; large language models; knowledge graphs; retrieval-augmented generation; faithfulness; terminology services
+
+\section{Introduction}
+
+\sct{} organises hundreds of thousands of clinical concepts in a polyhierarchy, and navigating it is a routine task in terminology work, data mapping and clinical system design~\citep{rogers2008browsers}. Large language models are increasingly placed in front of terminologies to explain where a concept sits and how concepts relate~\citep{chang2024snomedllm}. Ungrounded, they produce non-existent or wrong \sct{} identifiers~\citep{born2026hallucinations,schmid2025gmds}, and their taxonomic knowledge weakens towards leaf concepts~\citep{sun2024taxonomies}. Grounding answers in a knowledge graph reduces such errors when the graph is complete~\citep{soman2024kgrag,ali2026ontology}.
+
+In practice the graph is often not complete. Terminology services are queried on demand, so a system holds only the part of the hierarchy it has fetched: ancestors up to a depth limit, and children only if they were requested. Recent work shows that knowledge-graph retrieval-augmented generation degrades when triples are missing and that models then rely on memorisation~\citep{zhou2026brink}; that LLMs can be used to generate missing triples~\citep{xu2024gog}; and that models frequently answer rather than abstain when the retrieved context is insufficient~\citep{joren2025sufficient}. These studies use open-domain graphs or text, delete triples at random, and judge sufficiency with an LLM.
+
+In a clinical terminology the stakes differ. A model that fills a gap from memory may be right, but its claim is no longer traceable to the terminology. A model that reads ``no children were listed'' as ``this concept has no subtypes'' makes a false absence claim, the classic open-world error~\citep{razniewski2024completeness}. Our system records, for every concept it retrieves, whether its parent and child lists are complete. This raises a direct question: does passing that coverage information to the model change what it claims?
+
+\paragraph{Contributions.}
+\begin{enumerate}
+  \item A controlled evaluation in which retrieval conditions are produced by the deployed on-demand crawler replaying frozen BioPortal responses, so results describe a real retrieval pipeline rather than random triple deletion.
+  \item Deterministic, provenance-based labels for evidence sufficiency of every item, and for every hierarchical claim: supported, true but not retrieved (parametric fill-in), or false, including absence claims.
+  \item A test of coverage-annotated context against plain context on false absence claims, source misattribution and abstention (\pending{headline result}).
+  \item A quantification of what deterministic verification removes, and at what cost in answer completeness.
+\end{enumerate}
+
+\section{Related work}
+
+\paragraph{LLMs and \sct{}.} A scoping review of 37 studies found that \sct{} is mostly used to augment model inputs for concept normalisation, rarely as an inference-time retriever, and that evaluation practice is inconsistent~\citep{chang2024snomedllm}. LLMs have been evaluated for placing new concepts into \sct{}~\citep{dong2024placement}, for classifying candidate IS-A pairs~\citep{liu2024ichi}, for subsumption probing~\citep{he2023ontolama}, for hierarchy-aware embeddings~\citep{he2024hit} and for hierarchical retrieval of out-of-vocabulary queries~\citep{dilworth2025hierarchical}. Entity-linking studies report high rates of hallucinated codes~\citep{born2026hallucinations,schmid2025gmds,davidson2025elchallenge,mavridis2025rdf}.
+
+\paragraph{Knowledge-graph grounding.} KG-RAG improves biomedical question answering~\citep{soman2024kgrag,xiong2024medrag}, tool use against live APIs grounds answers in authoritative sources~\citep{jin2024genegpt,frei2025infherno}, and relation-path retrieval makes reasoning traceable~\citep{luo2024rog}. KG prompt augmentation reduces, but does not remove, inconsistent is-a reasoning~\citep{ucedasosa2024concepts}.
+
+\paragraph{Incompleteness and sufficiency.} \citet{zhou2026brink} benchmark KG-RAG under deleted triples; \citet{xu2024gog} let the LLM generate missing triples; \citet{joren2025sufficient} separate errors due to insufficient context from errors in using sufficient context, with an LLM autorater. Completeness assertions and negation in open-world knowledge bases are surveyed by \citet{razniewski2024completeness}.
+
+\paragraph{Faithfulness metrics.} Citation precision and recall~\citep{gao2023alce} and atomic-fact support~\citep{min2023factscore} score text against sources. We adapt both to graph evidence, where support can be decided exactly.
+
+\paragraph{Gap.} We found no study that, for a clinical terminology hierarchy, (i) varies retrieval completeness through the actual retrieval code, (ii) labels sufficiency and claim support deterministically, and (iii) tests explicit completeness metadata in the model's context. \pending{re-run the search before submission; update if new work appears}
+
+\section{Methods}
+
+The study follows a protocol fixed before data collection (supplementary file \texttt{RESEARCH\_PROTOCOL.md}, version 1.0).
+
+\subsection{System}
+The SNOMED CT Intelligent Explorer resolves a query to a concept, retrieves its ancestors by breadth-first search over BioPortal's \texttt{/parents} endpoint up to a depth limit, optionally retrieves its direct children (\texttt{/children}, paginated), and stores concepts and IS\_A edges in a graph database~\citep{whetzel2011bioportal}. For each concept and direction it records whether the list was retrieved completely, partially or not at all, with timestamp and source. Retrieval failures are recorded rather than treated as empty results.
+
+\subsection{Data}
+We used the BioPortal \texttt{SNOMEDCT} ontology (US Edition), under a SNOMED International licence \pending{licence type and reference; research fee waiver}, release \pending{release recorded in the data set, e.g. 2025\_09\_01}. For each of six top-level hierarchies (clinical finding, procedure, body structure, substance, pharmaceutical/biologic product, organism) we sampled \pending{30} concepts by seeded random descent through direct children to a target depth drawn uniformly from 2--8. For every sampled concept we stored its label, parents, children (with a completeness flag), BioPortal ancestor set, the parents of every ancestor, and the children of each parent. All \pending{n} API responses were frozen with timestamps; all experiments replay this snapshot. A pilot of 30 concepts with a different seed was used only to test the pipeline.
+
+\subsection{Tasks}
+Five task types with automatically derived gold answers: (T1) list direct parents; (T2) list direct children, when the gold child list is complete and has at most 100 entries; (T3) decide whether the concept is a kind of a given concept, with positives drawn from ancestors at least two IS\_A steps away and negatives from siblings; (T4) give an IS\_A chain to the concept's top-level ancestor; (T5) explain the concept's position in the hierarchy. Models return JSON containing the answer, a list of typed claims (\texttt{direct\_parent}, \texttt{ancestor}, \texttt{no\_children}, \texttt{no\_parents}), each labelled with its source (\texttt{evidence} or \texttt{model\_knowledge}), and an insufficient-evidence flag.
+
+\subsection{Retrieval conditions and context formats}
+Evidence was produced by running the system's crawler on the frozen snapshot: none (C0); ancestors to depth 1 (U1) or 2 (U2, the application default); depth 2 plus direct children (U2D); and the full ancestor closure plus direct children (FULL). Each non-empty context was rendered in two formats that contain identical edges: \emph{plain} (IS\_A edges only) and \emph{annotated} (edges plus, per concept, whether its parents and children are complete, partial, failed or not retrieved, and where retrieval stopped). The system prompt was identical across conditions and formats. An item is \emph{sufficient} under a context if the context alone determines its gold answer (e.g.\ T1 iff the parent list is complete; a negative T3 item iff the full ancestor closure is present).
+
+\subsection{Systems and models}
+R0 is a deterministic evidence-only reference that abstains whenever an item is insufficient. L denotes an LLM answer; LV is the same answer after deterministic verification, which keeps only content entailed by the context. Models: Llama~3.1 8B Instruct, Llama~3.3 70B Instruct and GPT-4o mini (snapshot 2024-07-18), accessed through OpenRouter with each model pinned to a single upstream provider and fallbacks disabled \pending{confirm providers and access dates from the run log}. Temperature was 0; a random 10\% of items was repeated three times to estimate nondeterminism.
+
+\subsection{Measures}
+Each claim was labelled against the context and the frozen reference as supported, true but not retrieved, false, outside the reference closure, contradicted by complete evidence, or undecidable. We report set F1 (T1, T2), accuracy (T3), valid-chain rate (T4), claim correctness (T5), unsupported-claim rate, false-claim rate, misattribution rate (claims attributed to the evidence but not supported by it), false-absence rate, abstention on sufficient and insufficient items, identifier check-digit failures, tokens and latency. Abstentions score zero.
+
+\subsection{Statistical analysis}
+Comparisons are paired on identical items: exact McNemar tests for binary outcomes and Wilcoxon signed-rank tests for per-item scores, with Holm correction within each hypothesis family and model. The depth trend in closed-book errors uses the Cochran--Armitage test. All rates have 95\% percentile bootstrap intervals (1{,}000 resamples, fixed seed). Two annotators, blind to model, condition and format, independently checked 100 T5 explanations for hierarchical statements absent from the structured claims and for contradictions between text and claims; agreement is reported as Cohen's $\kappa$. These judgements compare a model's text with its own output and need no clinical expertise; claim correctness is assessed automatically against \sct{}. The analysis code was fixed and tested on synthetic data before the main run.
+
+\section{Results}
+\pending{Table 1: data set characteristics (concepts per hierarchy, depth distribution, children, polyhierarchy share).}
+
+\pending{Table 2 (generated as results/main/analysis/table\_main.tex): scores and faithfulness rates by model, condition and format.}
+
+\pending{RQ1: closed-book false-claim rate and depth trend (H1).}
+
+\pending{RQ2: correctness by retrieval condition (H2a); share of correct claims that are not in the evidence (H2b).}
+
+\pending{RQ3: plain versus annotated context on false absence (H3a), misattribution (H3b), abstention and sufficient-item accuracy (H3c).}
+
+\pending{RQ4: claims removed by verification, split into false and true-but-not-retrieved; L versus LV scores.}
+
+\pending{Human evaluation: kappa and rate of unlisted claims in free text.}
+
+\section{Discussion}
+\pending{Interpretation tied strictly to the measured effects; implications for terminology services that expose coverage metadata; comparison with \citet{zhou2026brink} and \citet{joren2025sufficient}.}
+
+\paragraph{Limitations.} Random descent over-samples concepts under nodes with few children. Only IS\_A relationships and English preferred labels are covered. BioPortal serves the US Edition; other editions may differ. Template questions differ from real user questions, and a single prompt per task was used. Hosted models change and are deprecated; raw outputs are archived. Prompts containing \sct{} labels were sent to external providers. No clinician or terminologist took part, so we make no claim about clinical usefulness or safety; the study measures correctness and traceability against the terminology only. The study was limited to three models and one prompt per task by its budget. \pending{add limitations observed in the data}
+
+\section{Conclusion}
+\pending{one paragraph, after results}
+
+\section*{Data and code availability}
+Code, configurations and the protocol \pending{and concept identifiers, if SNOMED International permits} are available at \url{https://github.com/tanvirhasansikder/snomed-intelligent-agent}. \sct{} content is not redistributed; it is subject to the SNOMED CT licence. A licensee can regenerate the data set from the released code, configuration and seeds. \pending{archive a release with a DOI (e.g.\ Zenodo) at submission}
+
+\section*{Declarations}
+\pending{funding; competing interests; author contributions; use of AI assistance in software development and writing, as required by the target journal}
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+\end{document}

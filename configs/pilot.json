@@ -1,0 +1,116 @@
+{
+  "name": "pilot",
+  "_note": "Pilot (protocol Section 10): 5 concepts per hierarchy, separate seed, excluded from the main study. Pilot outputs are never reported as findings. A local Ollama model can be added for testing, e.g. {\"name\": \"local-open\", \"provider\": \"ollama\", \"model\": \"qwen2.5:3b\", \"json_mode\": true, \"timeout\": 300}.",
+  "_note_models": "Models (Amendment 1, 2026-11-03): three OpenRouter models with the upstream provider pinned (no fallback) for reproducibility. Prices are US$ per million tokens [input, output] as listed on 2026-11-03, used only for estimates and the --max-cost guard; recheck them and the provider slugs on each model's OpenRouter page before running.",
+  "budget_usd": 3,
+  "cache_path": "data/bioportal_cache/calls.jsonl",
+  "dataset_path": "data/datasets/pilot.json",
+  "max_child_pages": 20,
+  "child_pagesize": 100,
+  "data": {
+    "per_hierarchy": 5,
+    "seed": 2026110201,
+    "min_depth": 2,
+    "max_depth": 8
+  },
+  "experiment": {
+    "tasks": [
+      "T1",
+      "T2",
+      "T3",
+      "T4",
+      "T5"
+    ],
+    "conditions": [
+      "C0",
+      "U1",
+      "U2",
+      "U2D",
+      "FULL"
+    ],
+    "formats": [
+      "plain",
+      "annotated"
+    ],
+    "item_seed": 0,
+    "repeat_subset_fraction": 0.1,
+    "repeat_count": 3,
+    "child_display_cap": 100
+  },
+  "models": [
+    {
+      "provider": "openrouter",
+      "temperature": 0.0,
+      "max_tokens": 800,
+      "json_mode": true,
+      "rpm": 30,
+      "typical_completion_tokens": 300,
+      "name": "llama-small",
+      "model": "meta-llama/llama-3.1-8b-instruct",
+      "extra_body": {
+        "provider": {
+          "order": [
+            "deepinfra"
+          ],
+          "allow_fallbacks": false,
+          "require_parameters": true,
+          "data_collection": "deny"
+        }
+      },
+      "price_per_mtok": [
+        0.02,
+        0.04
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "temperature": 0.0,
+      "max_tokens": 800,
+      "json_mode": true,
+      "rpm": 30,
+      "typical_completion_tokens": 300,
+      "name": "llama-large",
+      "model": "meta-llama/llama-3.3-70b-instruct",
+      "extra_body": {
+        "provider": {
+          "order": [
+            "deepinfra"
+          ],
+          "allow_fallbacks": false,
+          "require_parameters": true,
+          "data_collection": "deny"
+        }
+      },
+      "price_per_mtok": [
+        0.1,
+        0.32
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "temperature": 0.0,
+      "max_tokens": 800,
+      "json_mode": true,
+      "rpm": 30,
+      "typical_completion_tokens": 300,
+      "name": "gpt-mini",
+      "model": "openai/gpt-4o-mini-2024-07-18",
+      "extra_body": {
+        "provider": {
+          "order": [
+            "openai"
+          ],
+          "allow_fallbacks": false,
+          "require_parameters": true,
+          "data_collection": "deny"
+        }
+      },
+      "price_per_mtok": [
+        0.15,
+        0.6
+      ]
+    }
+  ],
+  "results_dir": "results/pilot",
+  "llm_cache_path": "results/llm_cache.jsonl"
+}

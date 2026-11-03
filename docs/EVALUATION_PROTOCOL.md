@@ -1,3 +1,5 @@
+> **Superseded** on 2026-11-02 by `docs/RESEARCH_PROTOCOL.md` (v1.0). Kept for history.
+
 # Evaluation protocol (draft, not yet executed)
 
 Status: the framework in `evaluation/` and `explanation/` is implemented and unit-tested on a **synthetic** 7-node hierarchy only. No real benchmark has been built, no experiment has been run, and no results exist.

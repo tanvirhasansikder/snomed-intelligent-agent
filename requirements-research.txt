@@ -1,0 +1,4 @@
+# Optional extras for the research pipeline (figures, cross-checks).
+# Install with:  python -m pip install -r requirements-research.txt
+-r requirements-dev.txt
+matplotlib==3.10.7

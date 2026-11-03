@@ -1,0 +1,24 @@
+{
+  "name": "dryrun-synthetic",
+  "_note": "SYNTHETIC ontology + MockLLM. Tests the pipeline only; outputs are not findings.",
+  "synthetic": true,
+  "synthetic_seed": 0,
+  "cache_path": "data/synthetic/calls.jsonl",
+  "dataset_path": "data/synthetic/dataset.json",
+  "data": {"per_hierarchy": 10, "seed": 11, "min_depth": 2, "max_depth": 8},
+  "experiment": {
+    "tasks": ["T1", "T2", "T3", "T4", "T5"],
+    "conditions": ["C0", "U1", "U2", "U2D", "FULL"],
+    "formats": ["plain", "annotated"],
+    "item_seed": 0,
+    "repeat_subset_fraction": 0.1,
+    "repeat_count": 3,
+    "child_display_cap": 100
+  },
+  "models": [
+    {"name": "mock", "provider": "mock", "model": "mock-1",
+     "mock": {"fill_in_rate": 0.4, "hallucination_rate": 0.2, "false_absence_rate": 0.5, "seed": 0}}
+  ],
+  "results_dir": "results/dryrun",
+  "llm_cache_path": "results/dryrun/llm_cache.jsonl"
+}

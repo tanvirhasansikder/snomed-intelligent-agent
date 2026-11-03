@@ -219,3 +219,19 @@ __marimo__/
 
 # SNOMED Explorer
 crawler_state/
+
+# Research data and results contain SNOMED CT content (UMLS licence): never commit
+data/bioportal_cache/
+data/datasets/
+data/synthetic/
+results/
+
+# LaTeX build files
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.log
+paper/*.out
+paper/main.pdf

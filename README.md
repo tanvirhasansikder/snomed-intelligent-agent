@@ -83,14 +83,14 @@ The current system is designed to:
 
 | Feature | Status |
 | --- | --- |
-| BioPortal client (search, concept, parents, direct children with pagination, ancestors, release version) | Implemented, unit-tested with mocked HTTP; not checked against live BioPortal in the audit |
+| BioPortal client (search, concept, parents, direct children with pagination, ancestors, release version) | Implemented, unit-tested with mocked HTTP; concept, parents, search, children, ancestors and version checked live on 2026-10-17 |
 | Upward BFS crawler with failure recording and reuse of completed parent lists | Implemented, unit-tested |
 | Neo4j repository (concepts, IS_A edges, coverage metadata, traversals) | Implemented, unit-tested with a fake database; Cypher passes Neo4j's official linter; not run on a live server in the audit |
 | Query processor (ID check-digit validation, exact-label resolution, coverage, typed errors) | Implemented, unit-tested |
 | Streamlit UI (`main.py`) | Implemented, tested headlessly with Streamlit's AppTest |
 | Deterministic claim verifier and template explanation (`explanation/`) | Implemented, unit-tested |
-| Evaluation framework (`evaluation/`) | Implemented, tested on **synthetic** data only; no real benchmark or results yet |
-| LLM reasoning / explanations (`llm/`) | Planned, not implemented (files are empty) |
+| Research pipeline (`evaluation/`, `llm/`): data collection, retrieval conditions, LLM runner, scoring, statistics | Implemented and tested end to end on **synthetic** data with a mock model; no real experiment run yet |
+| LLM explanations inside the Streamlit app | Not implemented; the LLM layer is used by the experiments only |
 | Visualisation (`visualization/`), RF2 import, `models/`, `query_engine/`, `services/` | Planned placeholders (empty files) |
 
 See `docs/AUDIT.md` for the audit and `docs/CHANGES.md` for what changed.
@@ -175,18 +175,31 @@ $env:CYPHER_LINT_NODE_PATH="$env:TEMP\cypherlint\node_modules"; cd F:\499project
 python -m crawler.bioportal_client
 ```
 
-## Evaluation (framework only)
+## Research study
+
+The study design is fixed in `docs/RESEARCH_PROTOCOL.md` (v1.1). **Live data collection needs a SNOMED CT licence first: see `docs/LICENSING.md`.** Prior work and the novelty assessment are in `docs/LITERATURE_SEARCH.md`, target journals in `docs/JOURNALS.md`, and the manuscript draft in `paper/`. Step-by-step commands: **`docs/RUN_GUIDE.md`**.
 
 ```powershell
-# ids.txt: one SNOMED CT concept ID per line (max 50 per run)
-python -m evaluation.benchmark --ids ids.txt --live --out data\gold\snapshot.json
+python -m evaluation.collect --config configs/pilot.json --live      # freeze BioPortal data
+python -m evaluation.runner  --config configs/pilot.json --dry-run   # count calls and tokens
+python -m evaluation.runner  --config configs/pilot.json --max-cost 3 # run (resumable, cached, spending cap)
+python -m evaluation.report  --config configs/pilot.json             # tables, tests, figures
 ```
 
-Then use `evaluation.benchmark.generate_items`, `answer_from_graph` and `evaluate`. Protocol, systems and metrics: `docs/EVALUATION_PROTOCOL.md`. Gold snapshots go in `data/gold/`, which Git ignores because they contain SNOMED CT content.
+| Module | Role |
+| --- | --- |
+| `evaluation/collect.py`, `bioportal_cache.py` | Stratified sampling and closure collection; every BioPortal response recorded and replayable offline |
+| `evaluation/conditions.py` | Runs the real crawler on frozen data under 5 retrieval conditions; plain or coverage-annotated context |
+| `evaluation/tasks.py`, `gold.py` | Task items with gold answers, deterministic sufficiency, evidence-only reference system R0 |
+| `llm/` | Provider-neutral client (Ollama, Groq, OpenRouter, OpenAI, Gemini; optional provider pinning), response cache, per-call cost, versioned prompts, answer parser |
+| `evaluation/scoring.py`, `explanation/explainer.py` | Claim labels, misattribution, false absence, verified (LV) view |
+| `evaluation/stats.py`, `report.py`, `annotation.py` | McNemar, Wilcoxon, Cochran-Armitage, Holm, bootstrap, kappa; CSV/LaTeX/figures; human annotation |
+
+The earlier `evaluation/benchmark.py` (gold snapshot schema 1.0) is kept for compatibility; new work uses the modules above. Data and results are Git-ignored because they contain SNOMED CT content.
 
 ## Data source and licensing
 
-BioPortal's `SNOMEDCT` ontology is the SNOMED CT US Edition distributed through the UMLS; its use is governed by the UMLS licence. Do not publish retrieved SNOMED CT content without confirming it is permitted. Record the BioPortal release version with any results.
+BioPortal's `SNOMEDCT` ontology is the SNOMED CT US Edition. Bangladesh is not a SNOMED International Member territory, and BioPortal's terms limit users without a SNOMED licence to exploring and evaluating SNOMED CT: no storing of identifiers in databases or documents, and no redistribution. Storing concepts in Neo4j and running the research study therefore need a licence. See `docs/LICENSING.md` for the free research fee-waiver route. Never publish retrieved SNOMED CT content, and record the BioPortal release version with any results.
 
 ## Known limitations
 

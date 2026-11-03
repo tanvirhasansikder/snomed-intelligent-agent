@@ -48,3 +48,36 @@ Commits (local working copy; apply via the patch):
 | `data/gold/.gitignore` (new) | Keeps gold snapshots (SNOMED CT content) out of Git | Licensing |
 
 Not changed: `requirements.txt`, `crawler/cache.py`, `crawler/queue_manager.py`, `crawler/state_manager.py`, all other empty placeholder modules, `llm/`.
+
+
+# Research pipeline (2026-11-02)
+
+New, no change to app behaviour except where noted:
+
+| File | Purpose |
+| --- | --- |
+| `docs/RESEARCH_PROTOCOL.md`, `docs/LITERATURE_SEARCH.md`, `docs/JOURNALS.md`, `docs/RUN_GUIDE.md` | Frozen protocol v1.0, search log and novelty assessment, journal comparison, run guide |
+| `database/memory_repository.py` | In-memory GraphRepository for experiments (no Neo4j needed) |
+| `evaluation/bioportal_cache.py`, `collect.py`, `synthetic.py`, `sctid.py` | Record/replay of BioPortal, sampling and closure collection, synthetic test ontology, SCTID helpers |
+| `evaluation/gold.py`, `tasks.py`, `conditions.py`, `scoring.py`, `stats.py`, `runner.py`, `report.py`, `annotation.py` | Gold index, items and sufficiency, retrieval conditions via the real crawler, scoring, statistics, runner, analysis, human annotation |
+| `llm/client.py`, `providers.py`, `prompt_manager.py`, `reasoner.py` | Provider-neutral LLM client with cache, presets, versioned prompts, answer parser (previously empty files) |
+| `explanation/explainer.py` | Adds absence claims (`no_children`, `no_parents`) and child completeness; existing behaviour unchanged |
+| `configs/*.json` | Dry-run, pilot and main configurations |
+| `paper/` | Manuscript draft (methods written; results pending) and verified bibliography |
+| `tests/test_research_pipeline.py` | 36 tests for the above |
+| `requirements-research.txt` | Optional: matplotlib for figures |
+| `.gitignore` | Ignores `data/` caches, `results/` and LaTeX build files (SNOMED CT content must not be committed) |
+
+## 2026-11-03: protocol v1.1 (Amendment 1)
+
+These changes follow the author's decisions: supervisor approval, a US$20–30 budget for one month of API access, no clinician annotator, and no UMLS licence.
+
+| Change | Why |
+| --- | --- |
+| `llm/client.py`: optional `extra_body` (e.g. OpenRouter provider pinning), included in the cache fingerprint only when set; records `served_by` and the provider-reported `cost_usd` | Reproducibility on a router; real cost tracking |
+| `evaluation/runner.py`: `--max-cost` guard, per-call `cost_usd` and `served_by`, cost estimate in `--dry-run` from `price_per_mtok` | Hard budget limit |
+| `evaluation/report.py`: `cost_usd` column in `summary.csv` | Report spend per cell |
+| `configs/pilot.json`, `configs/main.json`: three pinned OpenRouter models with prices and budgets | The Groq Llama models became enterprise-only |
+| `evaluation/annotation.py`: annotators blind to model, condition and format; "clinically misleading" question replaced by "contradicts the structured claims" | No clinical annotator; avoid unblinded judgements |
+| `docs/LICENSING.md` (new), `docs/ANNOTATION_GUIDE.md` (new), protocol Amendment 1, `RUN_GUIDE.md`, `JOURNALS.md`, `README.md`, `paper/main.tex`, `.env.example` | Licensing route, the new procedure, journal re-ranking |
+| Tests: 4 new (pinning, cost, budget stop, blind annotation export) | |
