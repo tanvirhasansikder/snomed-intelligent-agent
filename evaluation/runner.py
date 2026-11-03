@@ -19,7 +19,7 @@ import time
 
 from evaluation.bioportal_cache import CallStore, SnapshotClient
 from evaluation.collect import PROJECT_ROOT, git_revision, load_config, resolve
-from evaluation.conditions import CONDITIONS, FORMATS, build_context
+from evaluation.conditions import CONDITIONS, build_context
 from evaluation.gold import GoldIndex
 from evaluation.scoring import score_answer
 from evaluation.tasks import TASKS, generate_items, reference_answer, sufficient
@@ -71,7 +71,7 @@ class Experiment:
         self.snapshot = SnapshotClient(self.store)
         self.items = self._select_items()
         self.conditions = self.exp.get("conditions", list(CONDITIONS))
-        self.formats = self.exp.get("formats", list(FORMATS))
+        self.formats = self.exp.get("formats", ["plain", "annotated"])  # v2 is opted into explicitly
         self._contexts = {}
         self.results_dir = resolve(config, "results_dir")
         self.responses_path = self.results_dir / "responses.jsonl"

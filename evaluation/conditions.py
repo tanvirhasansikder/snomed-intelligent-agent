@@ -9,6 +9,10 @@ crawler's frontier are captured in a ``Context`` and serialised for prompts:
 * ``plain``     IS_A edges only
 * ``annotated`` the same edges plus per-concept coverage (complete /
                 truncated / failed / not retrieved) and the depth frontier
+* ``v2``        evidence format of protocol v2.0: every edge has a stable ID
+                (E1, E2, ...) that claims cite, followed by the same coverage
+                information as ``annotated``. ``Context.edge_index()`` gives
+                the ID -> edge mapping used to check citations.
 """
 
 from collections import deque
@@ -25,7 +29,7 @@ CONDITIONS = {
     "U2D": {"depth": 2, "children": True},
     "FULL": {"depth": 20, "children": True},
 }
-FORMATS = ("plain", "annotated")
+FORMATS = ("plain", "annotated", "v2")
 
 #: App default page cap for children (5 pages x 100) and the cap used for FULL.
 APP_CHILD_PAGES = 5
@@ -124,11 +128,22 @@ class Context:
         order.extend(sorted(set(self.nodes) - seen))
         return order
 
+    def _ordered_edges(self):
+        """Edges in display order: by IS_A distance from the focal concept, ties by ID."""
+        rank = {cid: i for i, cid in enumerate(self._distance_order())}
+        return sorted(self.edges, key=lambda e: (rank.get(e[0], 1e9), rank.get(e[1], 1e9), e[0], e[1]))
+
+    def edge_index(self):
+        """Stable edge IDs as shown in the ``v2`` evidence: {"E1": (child, parent), ...}."""
+        return {f"E{i}": edge for i, edge in enumerate(self._ordered_edges(), 1)}
+
     def render(self, fmt):
         if fmt not in FORMATS:
             raise ValueError(f"format must be one of {FORMATS}")
         if self.condition == "C0" or not self.nodes:
             return "No evidence was retrieved."
+        if fmt == "v2":
+            return self._render_v2()
 
         rank = {cid: i for i, cid in enumerate(self._distance_order())}
         edges = sorted(self.edges, key=lambda e: (rank.get(e[0], 1e9), rank.get(e[1], 1e9)))
@@ -147,6 +162,24 @@ class Context:
                 frontier = ", ".join(self._label(c) for c in sorted(self.frontier, key=lambda c: rank.get(c, 1e9)))
                 lines.append(f"Retrieval stopped at the depth limit at: {frontier}. "
                              "Their more general ancestors were not retrieved.")
+        return "\n".join(lines)
+
+    def _render_v2(self):
+        rank = {cid: i for i, cid in enumerate(self._distance_order())}
+        lines = ["Retrieved SNOMED CT IS_A edges (child IS_A parent). Cite edges by their IDs."]
+        index = self.edge_index()
+        lines += [f"{eid}: {self._label(c)} IS_A {self._label(p)}" for eid, (c, p) in index.items()]
+        if not index:
+            lines.append("(no edges retrieved)")
+        lines.append("")
+        lines.append("Retrieval coverage (what was and was not retrieved):")
+        for concept_id in sorted(self.nodes, key=lambda c: (rank.get(c, 1e9), c)):
+            lines.append(f"- {self._label(concept_id)}: parents {self._parents_note(concept_id)}; "
+                         f"children {self._children_note(concept_id)}")
+        if self.frontier:
+            frontier = ", ".join(self._label(c) for c in sorted(self.frontier, key=lambda c: (rank.get(c, 1e9), c)))
+            lines.append(f"Retrieval stopped at the depth limit at: {frontier}. "
+                         "Their more general ancestors were not retrieved.")
         return "\n".join(lines)
 
     def _parents_note(self, concept_id):
