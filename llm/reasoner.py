@@ -14,6 +14,27 @@ from explanation.explainer import BINARY_RELATIONS, RELATIONS
 
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 _ID = re.compile(r"\d{6,18}")
+_EDGE_ID = re.compile(r"E\d+")
+
+
+def _as_citations(raw):
+    """Clean a claim's ``cites`` list: edge IDs such as "E3", deduplicated, in order.
+    Returns (citations, number of entries dropped as malformed)."""
+    if raw is None:
+        return [], 0
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return [], 1
+    cites, dropped = [], 0
+    for entry in raw:
+        text = str(entry).strip().upper() if isinstance(entry, (str, int)) and not isinstance(entry, bool) else ""
+        if _EDGE_ID.fullmatch(text):
+            if text not in cites:
+                cites.append(text)
+        else:
+            dropped += 1
+    return cites, dropped
 
 
 def _extract_json(text):
@@ -64,9 +85,10 @@ def _as_id(value):
 
 
 def _normalise_claims(raw):
-    claims, dropped = [], 0
+    """Returns (claims, claims dropped, citation entries dropped)."""
+    claims, dropped, bad_cites = [], 0, 0
     if not isinstance(raw, list):
-        return claims, (1 if raw not in (None, []) else 0)
+        return claims, (1 if raw not in (None, []) else 0), 0
     for entry in raw:
         if not isinstance(entry, dict):
             dropped += 1
@@ -80,14 +102,17 @@ def _normalise_claims(raw):
         if relation not in RELATIONS or subject is None or (relation in BINARY_RELATIONS and obj is None):
             dropped += 1
             continue
+        cites, bad = _as_citations(entry.get("cites"))
+        bad_cites += bad
         claims.append({"subject": subject, "relation": relation,
-                       "object": obj if relation in BINARY_RELATIONS else None, "source": source})
-    return claims, dropped
+                       "object": obj if relation in BINARY_RELATIONS else None, "source": source,
+                       "cites": cites})
+    return claims, dropped, bad_cites
 
 
 def parse_answer(text, task):
     result = {"answer": None, "claims": [], "insufficient_evidence": False,
-              "parse_error": None, "dropped_claims": 0}
+              "parse_error": None, "dropped_claims": 0, "dropped_citations": 0}
     try:
         data = _extract_json(text)
     except ValueError as exc:
@@ -96,7 +121,7 @@ def parse_answer(text, task):
 
     flag = data.get("insufficient_evidence", False)
     result["insufficient_evidence"] = flag is True or (isinstance(flag, str) and flag.lower() == "true")
-    result["claims"], result["dropped_claims"] = _normalise_claims(data.get("claims"))
+    result["claims"], result["dropped_claims"], result["dropped_citations"] = _normalise_claims(data.get("claims"))
 
     answer = data.get("answer")
     if task in ("T1", "T2", "T4"):

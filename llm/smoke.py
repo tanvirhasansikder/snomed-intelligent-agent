@@ -73,7 +73,7 @@ def smoke_reference():
                               parents_complete={X, P1, P2, TOP, CHILD})
 
 
-def run_smoke(client, fmt="annotated"):
+def run_smoke(client, fmt="v2"):
     """Send the five smoke questions; return one result dict per question."""
     context, reference = smoke_context(), smoke_reference()
     text = context.render(fmt)
@@ -95,6 +95,7 @@ def run_smoke(client, fmt="annotated"):
             "latency_s": response.latency_s, "parse_ok": parsed["parse_error"] is None,
             "parse_error": parsed["parse_error"], "answer": parsed["answer"],
             "n_claims": scores["n_claims"], "n_unsupported": scores["n_claims"] - scores.get("n_supported_by_subgraph", 0),
+            "n_cited_claims": sum(1 for c in parsed["claims"] if c.get("cites")),
             "score": scores.get("score"), "raw_text": response.text,
         })
         rows.append(row)
@@ -108,7 +109,7 @@ def _print_rows(rows):
             continue
         score = "n/a" if r["score"] is None else f"{r['score']:.2f}"
         print(f"{r['task']}: parse_ok={r['parse_ok']} finish={r['finish_reason']} score={score} "
-              f"claims={r['n_claims']} unsupported={r['n_unsupported']} "
+              f"claims={r['n_claims']} cited={r['n_cited_claims']} unsupported={r['n_unsupported']} "
               f"tokens={r['prompt_tokens']}/{r['completion_tokens']} latency={r['latency_s']}s")
         if not r["parse_ok"]:
             print(f"    parse error: {r['parse_error']}; start of reply: {r['raw_text'][:160]!r}")

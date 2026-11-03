@@ -118,6 +118,7 @@ def score_answer(item, parsed, context, reference):
         "parse_ok": parsed["parse_error"] is None,
         "parse_error": parsed["parse_error"],
         "dropped_claims": parsed.get("dropped_claims", 0),
+        "dropped_citations": parsed.get("dropped_citations", 0),
         "abstained": abstained,
         "n_claims": n,
         **{f"n_{label}": labels.get(label, 0) for label in LABELS},

@@ -6,7 +6,7 @@ The system prompt is identical across conditions and context formats, so the
 only manipulated variable is the evidence block itself.
 """
 
-PROMPT_VERSION = "v1.0"
+PROMPT_VERSION = "v2.0"  # v2.0: claims cite evidence edge IDs (protocol v2.0)
 
 SYSTEM_PROMPT = (
     "You answer questions about the SNOMED CT clinical terminology hierarchy. "
@@ -15,6 +15,8 @@ SYSTEM_PROMPT = (
     "You are given evidence retrieved from a terminology server. The evidence may be incomplete. "
     "You may also use your own knowledge, but you must label every claim with its source: "
     "\"evidence\" if the claim is stated in the evidence, otherwise \"model_knowledge\". "
+    "For every \"evidence\" claim, cite the IDs of the evidence edges (E1, E2, ...) that support it; "
+    "cite nothing for \"model_knowledge\" claims and never cite an edge ID that is not shown. "
     "Use concept IDs exactly; never invent IDs. "
     "If you cannot answer reliably, set \"insufficient_evidence\" to true. "
     "Reply with one JSON object and nothing else."
@@ -22,7 +24,8 @@ SYSTEM_PROMPT = (
 
 CLAIM_HELP = (
     'Each claim is {"subject": "<ID>", "relation": "<relation>", "object": "<ID or null>", '
-    '"source": "evidence" or "model_knowledge"}. Relations: "direct_parent" (subject IS_A object in one step), '
+    '"source": "evidence" or "model_knowledge", "cites": ["<edge ID>", ...]}. '
+    'Relations: "direct_parent" (subject IS_A object in one step), '
     '"ancestor" (subject IS_A object in one or more steps), "no_children" (subject has no subtypes; object null), '
     '"no_parents" (subject has no parents; object null).'
 )
