@@ -16,6 +16,7 @@ Purpose: decide what is already known before claiming any contribution. This is 
 | 2026-11-02 | same | LLM taxonomy is-a ... abstain ... medical terminology | Uceda-Sosa et al. (arXiv 2405.20163) |
 | 2026-11-02 | same | BioPortal SNOMED CT LLM explanation hierarchy navigation tool | Dilworth et al. 2025 (arXiv 2511.16698) |
 | 2026-11-02 | same | knowledge graph completeness closed/open world assumption absence of evidence | Razniewski et al. 2024 (ACM Computing Surveys) |
+| 2026-11-04 | same | Chain-of-Verification hallucination; LLMs cannot self-correct reasoning (for the S2 regeneration design) | Dhuliawala et al. 2024 (Findings of ACL); Huang et al. 2024 (ICLR) |
 
 Still to do before submission: PubMed and IEEE Xplore keyword searches with recorded hit counts; forward-citation search from Zhou et al. 2026, Joren et al. 2025 and Chang & Sung 2024.
 

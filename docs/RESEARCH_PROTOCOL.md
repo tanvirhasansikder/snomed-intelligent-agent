@@ -1,118 +1,254 @@
-# Research protocol v1.1 (frozen before data collection)
+# Research protocol v2.0
 
-v1.0 was written on 2026-11-02; v1.1 (2026-11-03) applies Amendment 1 below. Both versions precede any data collection or model run.
+**Faithful by Construction? Measuring and Verifying LLM Explanations of SNOMED CT Hierarchy over Partial, On-Demand Retrieved Subgraphs**
 
-Working title: **Coverage-aware grounding: measuring parametric fill-in when large language models explain SNOMED CT hierarchy from partial, on-demand retrieved subgraphs.**
-
-Status: design frozen on 2026-11-02, before any real data was collected. Changes after the pilot must be logged in the "Amendments" section with a date and reason. Pilot results are never reported as findings.
+* Written 2026-11-04, before any real SNOMED CT data was collected or any experimental model call was made. It replaces v1.1 (2026-11-03); the change log is at the end.
+* The design is fixed here. Prompt texts and the evidence format are frozen at the end of milestone M2, before the main data collection, under the Git tag `protocol-v2.0-frozen`.
+* Any later change goes into "Amendments" with a date and reason.
+* Pilot outputs are never reported as findings.
+* Context: CSE499 project, North South University; deadline 2026-12-03.
 
 ## 1. Problem
 
-Our system retrieves SNOMED CT on demand from BioPortal, so the graph an LLM sees is usually incomplete: ancestors stop at a depth limit, and children may not be retrieved at all. A model can then (a) answer only from evidence, (b) abstain, (c) fill gaps from its own memory, correctly or not, or (d) state false absences ("X has no subtypes"). Prior work shows KG-RAG degrades under incompleteness and that models rarely abstain when context is insufficient (see `docs/LITERATURE_SEARCH.md`). It has not been measured for clinical terminology hierarchies, nor whether telling the model *which parts of the evidence are complete* changes its behaviour.
+The system retrieves SNOMED CT **on demand** from BioPortal rather than loading a full release. The subgraph a model sees is therefore partial:
+* ancestors stop at a depth limit;
+* children are often not retrieved;
+* retrieval can fail.
 
-## 2. Research questions and hypotheses
+A deterministic graph query already answers a structured question such as "what are the parents of X?" correctly when the evidence is complete. An LLM adds value only where structured queries are awkward: natural-language explanations, multi-step reasoning (paths, common ancestors) and comparisons. Those are exactly the places where it can state relationships that are not in the evidence.
 
-| ID | Question | Hypothesis (directional, tested) |
+The study asks three things:
+* how often such statements occur;
+* how they depend on what was retrieved;
+* whether a deterministic, claim-level verifier can make explanations faithful to the retrieved evidence, and at what cost.
+
+**What is known.** See `docs/LITERATURE_SEARCH.md`.
+* KG-based RAG degrades when the graph is incomplete, and models fall back on memorised knowledge (Zhou et al., EACL 2026; Xu et al., EMNLP 2024).
+* Models rarely abstain when the context is insufficient (Joren et al., ICLR 2025).
+* Ontology-grounded generation reduces hallucination on a complete local graph (Ali et al., JBI 2026).
+* LLMs hallucinate SNOMED CT codes (Born et al., 2026).
+
+**What is open.** We found no study of claim-level faithfulness of LLM explanations of a clinical terminology hierarchy under partial, on-demand retrieval. Such a study would need:
+* sufficiency measured deterministically from the graph;
+* a verifier that separates "true but not retrieved" from "false".
+
+## 2. Contributions
+
+These are claims to be tested, not results.
+
+* **C-A: question-aware partial-subgraph retrieval (S1).** Retrieval scope depends on the question type: upward, downward or both.
+* **C-B: deterministic claim-level verification (S2).** Claims are typed triples with edge citations. They are checked against the retrieved subgraph; unsupported claims trigger one controlled regeneration and are then removed.
+* **C-C: measurement of how retrieval completeness affects faithfulness.** A paired comparison of upward-only retrieval (B1) with question-aware retrieval (S1), stratified by a deterministic sufficiency label for every item, with three-way claim labels from a frozen reference snapshot.
+
+## 3. Research questions and hypotheses
+
+| ID | Question | Hypothesis / analysis |
 | --- | --- | --- |
-| RQ1 | Without retrieval, how often do LLMs make false SNOMED CT hierarchy claims, and does this depend on concept depth? | H1: closed-book false-claim rate increases with concept depth (trend test). |
-| RQ2 | How does retrieval completeness change answer correctness and the source of claims? | H2a: correctness increases from none → up-1 → up-2 → up-2+children → full. H2b: under incomplete retrieval, a substantial share of correct claims are *not* supported by the evidence (parametric fill-in). |
-| RQ3 | Does coverage-annotated context (complete / truncated / not retrieved) change behaviour under incomplete retrieval? | H3a: fewer false absence claims (e.g. "no children" when children were simply not retrieved). H3b: fewer evidence-misattributed claims (claimed as from evidence but not in it). H3c: more abstention on insufficient items, without lower correctness on sufficient items. |
-| RQ4 | What does deterministic claim verification cost? | Descriptive: share of claims removed, split into false vs true-but-not-retrieved; resulting precision/recall trade-off. (Not a hypothesis: removal of unsupported claims is guaranteed by construction.) |
+| RQ1 | Without retrieval, how reliable are LLM statements about SNOMED CT hierarchy? | **H1:** closed-book (B0) false-claim and identifier-hallucination rates are above zero and rise with concept depth (trend test). |
+| RQ2 | Does question-aware retrieval improve correctness and faithfulness over upward-only retrieval? | **H2 (primary):** S1 scores higher than B1 and has a lower unsupported-claim rate, mainly on items where B1's evidence is insufficient (children, deep is-a, paths, common ancestors). |
+| RQ3 | How does retrieval completeness affect explanation reliability? | **H3 (primary):** within B1 and S1, items with insufficient evidence have higher unsupported-claim (fill-in) and false-claim rates than items with sufficient evidence. False absence claims ("X has no subtypes") occur mainly when children were not retrieved. |
+| RQ4 | What does deterministic verification gain and cost? | **H4 (primary):** S2 has fewer items with a false claim than S1. Also reported, descriptively: claims removed, split into true-but-not-retrieved vs false (the price of strictness); change in task score; regeneration success rate. That S2 has no claims unsupported by its evidence is guaranteed by construction, so it is not tested. |
+| RQ5 | What are the trade-offs? | Descriptive: faithfulness vs completeness vs tokens vs latency vs BioPortal requests, per system. |
 
-Primary hypotheses: H2a, H3a, H3b. Others are secondary. Holm correction is applied within each family.
+H2, H3 and H4 are the primary hypotheses; H1 is secondary. Holm correction is applied within each family.
 
-## 3. Data
+## 4. Data: frozen reference snapshot
 
-* **Source:** BioPortal `SNOMEDCT` (US Edition via UMLS). Release recorded from `latest_submission` (2025_09_01 as of 2026-10-17). All raw API responses are cached on disk with timestamps.
-* **Sampling:** for each of 6 top-level hierarchies (Clinical finding 404684003, Procedure 71388002, Body structure 123037004, Substance 105590001, Pharmaceutical/biologic product 373873005, Organism 410607006), seeded random descent from the top-level concept through direct children to a target depth drawn uniformly from 2–8 (stopping early at leaves). Duplicates are re-drawn. Top-level IDs are validated as children of the root (138875005) at run time.
-* **Size:** main study 30 concepts per hierarchy (180). Pilot: 5 per hierarchy (30) with a different seed, excluded from the main set.
-* **Gold closure per concept:** label, direct parents, direct children (with completeness flag), full ancestor closure with the direct parents of every ancestor, children of each direct parent (for sibling negatives). Shortest and longest path to the root are computed from the closure.
-* **Known bias:** random descent over-samples concepts below nodes with few children. Reported as a limitation; depth and hierarchy are reported for every result.
-* **Licensing (prerequisite):** Bangladesh is not a SNOMED International Member territory. Live collection starts only after the author holds a SNOMED CT licence that covers this research use: a SNOMED International Affiliate licence (registered through MLDS) with a research fee waiver, see `docs/LICENSING.md`. BioPortal's terms restrict users without a licence to exploring and evaluating SNOMED CT, and forbid copying identifiers into a database or document. Snapshots stay in `data/` (Git-ignored) and are never redistributed. We release code, configuration and seeds, from which a licensee can regenerate the data set; whether the list of sampled concept identifiers may be published is confirmed with SNOMED International first. Prompts sent to external LLM providers contain SNOMED CT labels; we request providers that do not retain data, and disclose this.
+* **Source:** BioPortal `SNOMEDCT` (SNOMED CT US Edition). The release is recorded from `latest_submission`. Every API response is stored with a timestamp (`evaluation/bioportal_cache.py`), and all experiments replay this snapshot offline. Retrieval is therefore deterministic, and the reference is fixed.
+* **Sampling** (`evaluation/collect.py`):
+  * six top-level hierarchies: Clinical finding 404684003, Procedure 71388002, Body structure 123037004, Substance 105590001, Pharmaceutical/biologic product 373873005 and Organism 410607006;
+  * each is validated as a child of the root 138875005;
+  * seeded random descent through direct children to a target depth drawn uniformly from 2–8, stopping at leaves.
+* **Size:**
+  * **main study:** 20 concepts per hierarchy, 120 in total, seed 2026110202;
+  * **pilot:** 2 per hierarchy, 12 in total, seed 2026110201, excluded from the main set.
+  * The size is set by the one-month schedule and the API quota (Section 8).
+* **Reference closure per concept:**
+  * label, direct parents, and direct children with a completeness flag;
+  * the BioPortal `/ancestors` set;
+  * the parents of every ancestor;
+  * the children of each direct parent (for sibling negatives).
+* **Known bias:** random descent over-samples concepts under nodes with few children. Depth and hierarchy are reported for every result.
+* **Data handling:** snapshots and results stay in `data/` and `results/` (Git-ignored) and are not redistributed. Licensing for publication is handled by the author and supervisor. No SNOMED CT content is sent to a provider in tests; experiment prompts do contain SNOMED CT labels (Section 11).
 
-## 4. Tasks (automatic gold)
+**The reference is used only for evaluation.** Systems at run time see only their retrieved evidence. The verifier in S2 checks against the retrieved evidence only, as it would when deployed. The three-way distinction (supported / true but not retrieved / false) is made **afterwards**, against the frozen reference. Without that reference, a claim that is true but not retrieved cannot be told apart from a false one, and we do not claim otherwise.
 
-| Task | Question | Gold | Primary score |
+## 5. Question types (automatic gold)
+
+| Task | Question | Gold (from the snapshot) | Primary score |
 | --- | --- | --- | --- |
-| T1 | Direct parents of X | set of IDs | set F1 |
-| T2 | Direct children of X (only when the gold child list is complete and has ≤ 100 children) | set of IDs, possibly empty | set F1; "no children" claims scored separately |
-| T3+ | Is X a kind of Y? Y = ancestor at ≥ 2 IS_A steps (root excluded) | yes | accuracy |
-| T3− | Is X a kind of Y? Y = sibling of X (child of a parent of X, not an ancestor of X) | no | accuracy |
-| T4 | Give an IS_A chain from X to its top-level concept | any valid chain | edge precision, reaches target |
-| T5 | Explain where X sits in the hierarchy | structured claims + text | claim labels (Section 7) |
+| T1 | Direct parents of X | set of IDs | set F1 (also P, R) |
+| T2 | Direct children of X (only where the gold child list is complete and has ≤ 100 children) | set, possibly empty | set F1; "no children" claims scored as absence claims |
+| T3 | Is X a kind of Y? Positive: Y is an ancestor ≥ 2 steps away (root excluded). Negative: Y is a sibling of X. | yes / no | accuracy |
+| T4 | IS_A path from X to its top-level concept | every valid upward path | exact validity (valid chain reaching the target); edge precision; **edge F1** against the best-matching gold path |
+| T6 | Nearest common ancestor of X and Z, where Z is another sampled concept of the same hierarchy (seeded pairing) | set of lowest common ancestors (LCA set; can have more than one in a polyhierarchy) | hit (answer ∈ LCA set); set F1 when several are given |
+| T5 | Explain where X sits in the hierarchy | structured claims plus text | claim labels (Section 7); completeness = recall of X's gold parents, and whether the child status is stated correctly |
 
-Each answer is JSON with concept IDs, each claim tagged `source: evidence | model_knowledge`, plus an `insufficient_evidence` flag.
+Every answer is JSON containing:
+* the answer;
+* typed claims (`direct_parent`, `ancestor`, `no_children`, `no_parents`), each with `source: evidence | model_knowledge` and the **IDs of the evidence edges it cites**;
+* an `insufficient_evidence` flag.
 
-## 5. Retrieval conditions (real crawler, offline)
-
-Contexts are produced by the project's own `BFSCrawler` / `GraphBuilder` running against a `SnapshotClient` that replays the frozen BioPortal responses. Results therefore describe the deployed retrieval code, and runs are deterministic.
-
-| Code | Retrieval |
-| --- | --- |
-| C0 | none (closed book) |
-| U1 | upward BFS, depth 1 |
-| U2 | upward BFS, depth 2 (current app default, children off) |
-| U2D | upward depth 2 + direct children of X (current app with children on) |
-| FULL | full ancestor closure + direct children of X |
-
-**Context format factor A** (all conditions except C0):
-* `plain`: IS_A edges only.
-* `annotated`: the same edges plus, per concept, whether its parent list and child list are complete, truncated, failed or not retrieved, and which concepts lie at the depth frontier.
-
-**Sufficiency** of each item × condition is computed deterministically (e.g. T1 is sufficient iff X's parent list is complete in the context; T3− is sufficient only if X's full ancestor closure is present).
+**Sufficiency** of each item under each system's evidence is computed deterministically. For example:
+* T1 is sufficient if X's parent list is complete;
+* a negative T3 item is sufficient only if X's full ancestor closure is present;
+* T6 is sufficient if both closures are present.
 
 ## 6. Systems
 
-| Code | System |
+| Code | System | Retrieval (offline replay of the snapshot) | Status on 2026-11-04 |
+| --- | --- | --- | --- |
+| R0 | Deterministic template answer, no LLM | Run on B1 and on S1 evidence, giving an evidence-only reference for each | implemented for T1–T5 under the older retrieval settings; T6 and S1 evidence: M2 |
+| B0 | Closed-book LLM | none | implemented (setting `C0`) |
+| B1 | LLM + upward-only retrieval | the app's current crawler: upward BFS to depth 2, no children (setting `U2`) | implemented |
+| S1 | LLM + question-aware retrieval | per question type (below) | M2 |
+| S2 | S1 + deterministic verification + one controlled regeneration | as S1 | verifier and filter implemented; citations, the free-text check and regeneration: M2 |
+| B2 (optional) | LLM-generated read-only Cypher over Neo4j loaded with the frozen snapshot | the whole snapshot (more data than S1; stated as a caveat) | go/no-go decision by 2026-11-21 |
+
+**S1 retrieval planner.** The planner gets the question type: it is known for benchmark items, and the UI classifies it with rules. It then retrieves:
+
+| Question type | Retrieval |
 | --- | --- |
-| R0 | Deterministic template answer from the context (no LLM): evidence-only reference |
-| L | LLM answer (per model × condition × format) |
-| LV | L after deterministic verification: claims not supported by the context are removed; answers with no remaining support become "insufficient evidence" |
+| T1 | parents of X |
+| T2 | children of X (paged) |
+| T3, T4 | upward closure of X |
+| T6 | upward closures of X and Z |
+| T5 | parents up to depth 2 plus the children of X |
 
-Text-to-Cypher (as in Soman et al. 2024) is excluded: it needs a live database per condition and is a different research question. Stated as a limitation.
+There is a request budget per question (default 60 BioPortal requests). If the budget runs out, the evidence is marked incomplete, so S1 is partial by design rather than complete by assumption.
 
-**Models (Amendment 1):** three models through OpenRouter, each pinned to one upstream provider with fallbacks disabled: Llama 3.1 8B Instruct and Llama 3.3 70B Instruct (open weights, two sizes of one family) and GPT-4o mini, dated snapshot 2024-07-18 (closed, widely used). Exact model identifiers, the provider that served each call, date, temperature 0, max tokens and cost are recorded per call. Main run: one response per item. Nondeterminism: 3 repetitions on a random 10% subset.
+**Evidence format, identical for B1, S1 and S2,** so that B1 and S1 differ only in what was retrieved:
+* numbered edges `E1: X IS_A Y`;
+* per concept, whether its parent list and child list are complete, partial, failed or not retrieved;
+* the depth frontier.
 
-**Budget:** US$20–30 in total for one month of API access. The runner's `--max-cost` guard stops a run at a set spend. The dry-run estimate on synthetic data at main-study size is about US$5 for the three models (worst case about US$10 if every answer used the 800-token limit); real labels are longer, so we plan for about twice that. The pilot is capped at US$3 and the main study at US$20. If the money runs out, the smallest model is dropped first, and the reason is recorded here.
+**S2 verification:**
+1. Parse the claims.
+2. Label each claim against the retrieved evidence, and check its cited edges.
+3. Check that every concept ID mentioned in the free text appears among the claims.
+4. If any claim is unsupported, or any ID is unlisted, make **one** regeneration request. It lists the exact unsupported claims and asks the model to remove them or mark them as insufficient evidence.
+5. Remove any claim that is still unsupported, and turn answers left without support into "insufficient evidence".
+
+We use deterministic external feedback because intrinsic self-correction without such feedback is unreliable (Huang et al., ICLR 2024; compare the self-verification approach of Dhuliawala et al., Findings of ACL 2024). Generated claims never modify the stored graph.
+
+**Models:**
+* **Primary:** `gemini-3.5-flash-lite` through Google's OpenAI-compatible endpoint, temperature 0, `reasoning_effort=low`, JSON mode, max 800 output tokens. It is a fixed, non-preview identifier and passed the M0 smoke test on 2026-11-04 (synthetic evidence only).
+* **Optional second model (open weights):** `gemma-4-31b-it` through the same API. To be smoke-tested first.
+* Every call records the model ID returned, settings, prompt version, tokens, latency, finish reason and raw output.
+* **Nondeterminism:** 3 repetitions on a random 10% of items.
 
 ## 7. Claim labels and metrics
 
-Claims are typed triples: `direct_parent(X,Y)`, `ancestor(X,Y)`, `no_children(X)`, `no_parents(X)`. Each is labelled by `explanation/explainer.py` against the context and the frozen reference:
+Each claim is labelled by `explanation/explainer.py`:
 
-`supported_by_subgraph` · `true_not_retrieved` (parametric fill-in, correct) · `false_in_reference` · `unknown_identifier` · `contradicted_by_complete_evidence` · `insufficient_evidence`
+| Label | Meaning |
+| --- | --- |
+| `supported_by_subgraph` | entailed by the retrieved evidence |
+| `true_not_retrieved` | true in the reference but not in the evidence, i.e. parametric fill-in |
+| `false_in_reference` | false in the reference |
+| `contradicted_by_complete_evidence` | conflicts with evidence that is complete |
+| `unknown_identifier` | an ID not in the reference |
+| `insufficient_evidence` | the reference cannot decide |
 
-Metrics: set P/R/F1 (T1, T2), accuracy (T3), edge precision and target reached (T4), unsupported-claim rate, false-claim rate, ID hallucination rate, **misattribution rate** (claim tagged `evidence` but not supported), **false-absence rate** (`no_children`/`no_parents` claims that are false), abstention rate on sufficient vs insufficient items, tokens, latency.
+**Metrics:**
+* **Task:**
+  * P/R/F1 (T1, T2, T6);
+  * accuracy (T3);
+  * exact validity, edge precision and edge F1 (T4);
+  * LCA hit (T6);
+  * completeness (T5).
+* **Faithfulness:**
+  * **unsupported-claim rate:** claims not supported by the retrieved evidence;
+  * **false-claim rate:** false in the reference;
+  * **true-not-retrieved rate**;
+  * **identifier hallucination rate:** cited IDs that are unknown or have an invalid check digit;
+  * **misattribution rate:** claims tagged `evidence` but not supported;
+  * **false-absence rate**;
+  * **unlisted ID mentions** in the free text.
+* **Citations,** adapting the statement-level citation recall and precision of Gao et al. (EMNLP 2023), with graph entailment in place of an NLI model:
+  * **citation precision:** claims whose cited edges exist in the evidence and entail the claim, as a share of claims that cite anything;
+  * **citation recall:** supported claims with an entailing citation, as a share of supported claims.
+* **Behaviour:**
+  * abstention rate, and accuracy conditional on sufficiency;
+  * for S2: regeneration rate and claims removed, split by reference label.
+* **Efficiency:**
+  * prompt and completion tokens per question;
+  * LLM latency;
+  * BioPortal requests per question, counted in replay;
+  * live retrieval latency, measured separately on 30 questions against BioPortal, because replay timing does not reflect it.
 
-## 8. Analysis
+## 8. Analysis and sample size
 
-* Paired comparisons on identical items: exact McNemar (binary), Wilcoxon signed-rank (per-item F1), Holm correction within each hypothesis family.
-* Trend over depth (H1): Cochran–Armitage trend test on false-claim presence by depth bin.
-* 95% percentile bootstrap CIs (1,000 resamples, seed 0) for every reported rate.
-* All results reported per model, overall and by hierarchy and depth; no pooling across models for hypothesis tests.
-* Effect sizes reported alongside p-values. No result is dropped; failed or unparseable responses are counted as such.
+* **Paired comparisons on identical items:**
+  * primary contrasts: B1 vs S1 (H2) and S1 vs S2 (H4);
+  * secondary: B0 vs B1.
+* **Tests:**
+  * binary outcomes (T3 correct, T4 valid, T6 hit, "item has a false claim"): exact McNemar test;
+  * per-item F1: Wilcoxon signed-rank test;
+  * rate differences: paired bootstrap over items (claims are clustered within items);
+  * H1: Cochran–Armitage trend test over depth bins;
+  * H3: sufficient vs insufficient items within each system, with a bootstrap CI for the difference, and the item-level McNemar test where pairing exists (B1 vs S1 on the same item).
+* **Reporting:**
+  * 95% percentile bootstrap CIs (1,000 resamples, seed 0) for every rate;
+  * effect sizes with every p-value;
+  * results per model, never pooled across models;
+  * results by question type, hierarchy and depth.
+* **No result is dropped.** Failed or unparseable responses are counted as failures.
+* **Calls and quota:**
+  * about 120 concepts × 6 question types gives roughly 650 items, after T2 and T6 eligibility;
+  * the LLM systems need about B0 + B1 + S1 + about 0.3 regeneration ≈ 3.3 calls per item, about 2,200 calls, plus the repetitions: **about 2,400 calls per model**.
+  * On the free tier (2026-11-04: Flash-Lite 15 requests/minute and 500/day; Gemma 4 31B 30/minute, 14,400/day and 16K input tokens/minute), Flash-Lite needs about 5 days and Gemma about 3 hours.
+  * If the daily cap threatens the schedule, billing is enabled; this is recorded as an amendment.
 
-## 9. Human evaluation
+## 9. Human check of the structured-claim assumption (minimal)
 
-Two annotators, independently, on 100 randomly sampled T5 explanations (stratified by model, condition and format; annotators blind to all three): (a) does the free text state any hierarchical claim not in the structured claim list? (b) does the free text contradict the structured claims or the answer? Cohen's kappa reported; disagreements adjudicated. This validates that structured-claim scoring reflects the text.
+Scoring relies on the structured claims the model lists. We check how far its free text agrees with them:
+* The author labels 50 T5 explanations, stratified and blind to system and model, using `docs/ANNOTATION_GUIDE.md`.
+* Questions: (a) does the text contain a hierarchical claim missing from the claim list? (b) does the text contradict the claims?
+* A test–retest relabelling of 20 items after at least 7 days gives intra-rater agreement (Cohen's κ).
+* A larger, two-annotator evaluation is optional.
+* Clinical appropriateness is **out of scope**; the project makes no claim about clinical safety or usefulness.
 
-Both questions compare a model's text with its own structured output and need no clinical expertise; the annotators are the author and one trained peer (computer science), working from a written guideline. Correctness of every hierarchical claim is judged automatically against the frozen SNOMED CT hierarchy, not by humans. Clinical appropriateness and usefulness are **out of scope** (Amendment 1): the paper makes no claim about clinical safety or utility.
+## 10. Procedure and milestones
 
-## 10. Procedure
+| Milestone | Dates | Work |
+| --- | --- | --- |
+| M0 | Nov 4–5 | Windows verification (done: 294 tests, dry run); Gemini smoke test (done); this protocol |
+| M1 | by Nov 10 | Evidence v2 (edge IDs, coverage); shared single-question pipeline (`llm/agent.py`); citations in the answer schema |
+| M2 | by Nov 17 | S1 planner; T6; verifier upgrades; S2 regeneration; pilot (12 concepts); freeze prompts and evidence format (`protocol-v2.0-frozen`) |
+| M3 | by Nov 24 | Main snapshot (120 concepts); runs; analysis; 30-item error analysis; live latency measurement; B2 decision (Nov 21) |
+| M4 | by Dec 1 | Streamlit "ask and verify" page with offline replay fallback; report; slides; rehearsal |
+| Buffer | Dec 2–3 | — |
 
-0. Obtain the SNOMED CT licence (Section 3). Until then, only the synthetic dry run is performed.
-1. Freeze this protocol and `configs/*.json` in Git (tag `protocol-v1.1`).
-2. Pilot (30 concepts, the three study models, US$3 cap): check parsing, cost, timing; fix bugs only. Pilot outputs stay in `results/pilot/`.
-3. Record amendments.
-4. Main data collection (180 concepts), then main runs, then analysis scripts unchanged from the pilot.
+The pilot checks parsing, quota, timing and bugs only. Analysis scripts are fixed before the main run.
 
-## 11. Threats to validity
+## 11. Threats to validity and limitations
 
-Sampling bias (Section 3); BioPortal US Edition only; IS_A only; English labels; model versions change and are deprecated (raw outputs archived); prompt sensitivity (one fixed prompt per task, documented); task templates differ from real clinical questions; external providers may log prompts; no clinician or terminologist was involved, so clinical relevance is argued, not measured; hosted model behaviour can change behind a fixed identifier (mitigated by dated snapshots, provider pinning and archived raw outputs); a small budget limits the study to three models and one prompt.
+* **Data:**
+  * sampling bias (Section 4);
+  * one source (BioPortal, US Edition), IS_A only, English labels;
+  * the gold is a BioPortal snapshot, not an RF2 release, and is checked against `/ancestors` for consistency.
+* **Task design:**
+  * template questions differ from real user questions;
+  * one fixed prompt per task;
+  * in the benchmark the question type is given to S1 (the UI's rule-based classifier is evaluated only informally);
+  * B2, if run, sees more data than S1.
+* **Models:**
+  * hosted models change behind fixed names; mitigated by non-preview identifiers, recorded responses and archived raw outputs;
+  * a small model set (one, or optionally two, models).
+* **Provider and data:**
+  * free-tier provider terms may allow prompts to be used by the provider; paid tiers differ. This is disclosed, and billing can be enabled.
+* **Evaluation:**
+  * claim scoring depends on the model listing its claims (Section 9 checks this);
+  * no clinician or terminologist was involved;
+  * no claim of clinical utility.
 
-## Amendments
+## Change log and amendments
 
-**Amendment 1 (2026-11-03, before any data collection or model run).** Reasons: decisions from the author and supervisor, plus provider changes found while costing the study.
-1. *Models:* the v1.0 Groq models (Llama 3.1 8B Instant, Llama 3.3 70B Versatile) became enterprise-only on Groq in August 2026 (per a third-party pricing tracker; Groq's own page could not be checked from here). Replaced by the three pinned OpenRouter models in Section 6.
-2. *Budget:* US$20–30 total, one month of API access; enforced with `--max-cost`.
-3. *Human evaluation:* no clinical annotator. Question (b) changed from "clinically misleading" to "contradicts the structured claims", annotators blinded, clinical appropriateness declared out of scope (Section 9).
-4. *Licensing:* live collection deferred until a SNOMED CT licence is in place (Section 3; `docs/LICENSING.md`).
+* **v1.0 (2026-11-02):** coverage-aware grounding design. Retrieval settings C0, U1, U2, U2D and FULL; plain vs coverage-annotated context; three OpenRouter models.
+* **v1.1 (2026-11-03):** Groq models replaced; budget cap; non-clinical annotation; licensing prerequisite.
+* **v2.0 (2026-11-04), decided by the author with the supervisor, before any data or experimental call:**
+  1. **Systems:** the author's systems R0, B0, B1, (B2), S1 and S2 replace the v1 setting × format grid. B0 = C0 and B1 = U2 are kept. The question-aware planner (S1) and regeneration (S2) are added. U2D, FULL and the plain-vs-annotated comparison become optional ablations; S1 always uses the annotated evidence format.
+  2. **Question types:** T6 (nearest common ancestor) added. Edge F1, citation precision/recall, unlisted-ID mentions and efficiency metrics added.
+  3. **Models:** Gemini replaces OpenRouter. `gemini-2.5-flash` is unavailable to new users, and `gemini-3.8-flash` allows only 20 requests per day on the free tier. `gemini-3.5-flash-lite` was chosen; Gemma 4 31B is optional. The OpenRouter configurations are retired at M2.
+  4. **Scope:** sample size 180 → 120 concepts and pilot 30 → 12 (schedule and quota); human evaluation reduced to one annotator with a test–retest check; the licensing section is replaced by data-handling rules (licensing is handled by the author).
