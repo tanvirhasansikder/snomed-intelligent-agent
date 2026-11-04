@@ -45,6 +45,10 @@ QUESTIONS = {
            "ancestors, and whether it has subtypes. Keep the explanation under 120 words, and list "
            "every hierarchical statement it makes as a claim.",
            '{{"answer": "<explanation>", "claims": [...], "insufficient_evidence": false}}'),
+    "T6": ("What is the nearest common ancestor of {x} and {y}, i.e. the most specific concept that both "
+           "are kinds of? If several are equally specific, list all of them. Support each with ancestor "
+           "claims for both concepts.",
+           '{{"answer": ["<ancestor ID>", ...], "claims": [...], "insufficient_evidence": false}}'),
 }
 
 

@@ -124,7 +124,7 @@ def parse_answer(text, task):
     result["claims"], result["dropped_claims"], result["dropped_citations"] = _normalise_claims(data.get("claims"))
 
     answer = data.get("answer")
-    if task in ("T1", "T2", "T4"):
+    if task in ("T1", "T2", "T4", "T6"):
         if isinstance(answer, list):
             ids = [_as_id(a) for a in answer]
             result["answer"] = [i for i in ids if i is not None]

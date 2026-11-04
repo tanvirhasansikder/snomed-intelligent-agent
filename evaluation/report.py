@@ -156,13 +156,13 @@ def hypothesis_tests(rows):
                 {"groups": json.dumps(list(zip(successes, totals)))})
 
         # H2a: adjacent retrieval conditions (plain format), per task
-        for task in ("T1", "T2", "T3", "T4", "T5"):
+        for task in ("T1", "T2", "T3", "T4", "T5", "T6"):
             for left, right in zip(CONDITION_ORDER, CONDITION_ORDER[1:]):
                 a, b = (model, left, _cell(left, "plain")), (model, right, _cell(right, "plain"))
                 pairs = _paired_task(idx, a, b, task, lambda r: r.get("score"))
                 if not pairs:
                     continue
-                if task in ("T3", "T4"):
+                if task in ("T3", "T4", "T6"):
                     result = mcnemar_exact([(x == 1.0, y == 1.0) for x, y in pairs])
                 else:
                     result = wilcoxon_signed_rank(pairs)

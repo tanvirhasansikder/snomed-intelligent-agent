@@ -61,6 +61,11 @@ class Context:
     def children_of(self, concept_id):
         return sorted(c for c, p in self.edges if p == concept_id)
 
+    def lowest_common_ancestors(self, concept_a, concept_b):
+        """Lowest common ancestors of two concepts within the retrieved evidence."""
+        from evaluation.gold import lowest_common
+        return lowest_common(self.ancestors_of(concept_a), self.ancestors_of(concept_b), self.ancestors_of)
+
     def ancestors_of(self, concept_id):
         seen, queue = set(), deque([concept_id])
         while queue:
@@ -215,8 +220,13 @@ class Context:
         return "NOT RETRIEVED" + (f" ({n} listed incidentally)" if n else "")
 
 
-def build_context(snapshot_client, concept_id, condition, child_display_cap=100):
-    """Run the real retrieval code for one concept under one condition."""
+def build_context(snapshot_client, concept_id, condition, child_display_cap=100, also_expand=()):
+    """
+    Run the real retrieval code for one concept under one condition.
+    ``also_expand``: further concepts expanded with the same settings
+    (e.g. the second concept of a T6 question), so a fixed baseline sees
+    both concepts of a two-concept question.
+    """
 
     if condition not in CONDITIONS:
         raise ValueError(f"condition must be one of {list(CONDITIONS)}")
@@ -227,14 +237,17 @@ def build_context(snapshot_client, concept_id, condition, child_display_cap=100)
 
     repo = InMemoryGraphRepository()
     builder = GraphBuilder(default_depth=spec["depth"], repository=repo, client=snapshot_client, use_cache=False)
-    builder.expand_concept(concept_id, depth=spec["depth"])
-    report = builder.last_report
+    reports = []
+    for start in [concept_id, *[c for c in also_expand if c and c != concept_id]]:
+        builder.expand_concept(start, depth=spec["depth"])
+        if builder.last_report:
+            reports.append(builder.last_report)
 
     if spec["children"]:
         pages = FULL_CHILD_PAGES if condition == "FULL" else APP_CHILD_PAGES
         builder.expand_children(concept_id, max_pages=pages)
 
-    return fill_context(context, repo, [report] if report else [], concept_id, child_display_cap)
+    return fill_context(context, repo, reports, concept_id, child_display_cap)
 
 
 def fill_context(context, repo, reports, concept_id, child_display_cap=100):

@@ -49,7 +49,7 @@ import time
 from dataclasses import asdict, dataclass, field
 
 from evaluation.conditions import build_context
-from evaluation.tasks import Item, sufficient
+from evaluation.tasks import TWO_CONCEPT_TASKS, Item, sufficient
 from explanation.citations import check_citation
 from explanation.explainer import SUPPORTED, HierarchyClaim, verify_claim
 from llm.client import LLMError
@@ -144,8 +144,9 @@ class HierarchyAgent:
         if RETRIEVAL[system] == "S1":
             return build_s1_context(self.retrieval_client, item, budget=self.request_budget,
                                     child_display_cap=self.child_display_cap)
+        also = (item.target_id,) if item.task in TWO_CONCEPT_TASKS and item.target_id else ()
         return build_context(self.retrieval_client, item.concept_id, RETRIEVAL[system],
-                             child_display_cap=self.child_display_cap)
+                             child_display_cap=self.child_display_cap, also_expand=also)
 
     def label(self, concept_id, context=None):
         if context is not None and concept_id in context.nodes:
@@ -234,9 +235,10 @@ def _main(argv=None):
     source.add_argument("--live", action="store_true", help="Retrieve from BioPortal (sends SNOMED CT labels to the LLM)")
     source.add_argument("--synthetic", action="store_true", help="Use the synthetic ontology (no SNOMED CT content)")
     parser.add_argument("--concept", help="Concept ID (default with --synthetic: a deep synthetic concept)")
-    parser.add_argument("--target", help="Target concept ID (T3: candidate ancestor; T4: top-level concept)")
+    parser.add_argument("--target", help="Second concept ID (T3: candidate ancestor; T4: top-level concept; "
+                                         "T6: the other concept)")
     parser.add_argument("--budget", type=int, default=DEFAULT_BUDGET, help="S1 request budget per question")
-    parser.add_argument("--task", required=True, choices=["T1", "T2", "T3", "T4", "T5"])
+    parser.add_argument("--task", required=True, choices=["T1", "T2", "T3", "T4", "T5", "T6"])
     parser.add_argument("--system", default="B1", choices=SYSTEMS)
     parser.add_argument("--provider", default="gemini")
     parser.add_argument("--model", default="gemini-3.5-flash-lite")
@@ -274,8 +276,8 @@ def _main(argv=None):
 
     item = Item(f"cli:{args.task}:{concept_id}", args.task, concept_id, None, target_id=args.target,
                 polarity="pos" if args.task == "T3" else None)
-    if args.task in ("T3", "T4") and not args.target:
-        parser.error("--target is required for T3 and T4")
+    if args.task in ("T3", "T4", "T6") and not args.target:
+        parser.error("--target is required for T3, T4 and T6")
 
     result = HierarchyAgent(llm, retrieval_client, request_budget=args.budget).answer(item, args.system)
     if args.json:

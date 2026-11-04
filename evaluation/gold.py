@@ -58,6 +58,14 @@ class GoldIndex:
                 queue.extend(self.parents.get(node, []))
         return frozenset(seen)
 
+    def lowest_common_ancestors(self, concept_a, concept_b):
+        """
+        Most specific shared ancestors of two concepts: common ancestors that
+        are not an ancestor of another common ancestor (several are possible
+        in a polyhierarchy).
+        """
+        return lowest_common(self.ancestors(concept_a), self.ancestors(concept_b), self.ancestors)
+
     def distance_to_ancestors(self, concept_id):
         """Shortest number of IS_A steps from concept to each ancestor."""
         dist, queue = {concept_id: 0}, deque([concept_id])
@@ -107,3 +115,12 @@ class GoldIndex:
 
     def top_level_of(self, concept_id):
         return self.samples[concept_id]["hierarchy_id"] if concept_id in self.samples else None
+
+
+def lowest_common(ancestors_a, ancestors_b, ancestors_of):
+    """Common ancestors not more general than another common ancestor."""
+    common = set(ancestors_a) & set(ancestors_b)
+    more_general = set()
+    for node in common:
+        more_general |= set(ancestors_of(node)) & common
+    return sorted(common - more_general)

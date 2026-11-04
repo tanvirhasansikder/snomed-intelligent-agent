@@ -22,7 +22,7 @@ from evaluation.collect import PROJECT_ROOT, git_revision, load_config, resolve
 from evaluation.conditions import CONDITIONS, build_context
 from evaluation.gold import GoldIndex
 from evaluation.scoring import score_answer
-from evaluation.tasks import TASKS, generate_items, reference_answer, sufficient
+from evaluation.tasks import TASKS, TWO_CONCEPT_TASKS, generate_items, reference_answer, sufficient
 from llm.client import CachedClient, LLMError, ResponseCache, estimate_tokens
 from llm.prompt_manager import PROMPT_VERSION, build_messages
 from llm.providers import build_client
@@ -85,12 +85,18 @@ class Experiment:
             items = [i for i in items if i.concept_id in keep]
         return items
 
-    def context(self, concept_id, condition):
-        key = (concept_id, condition)
+    def context(self, concept_id, condition, also_expand=()):
+        key = (concept_id, condition, tuple(also_expand))
         if key not in self._contexts:
             self._contexts[key] = build_context(self.snapshot, concept_id, condition,
-                                                child_display_cap=self.exp.get("child_display_cap", 100))
+                                                child_display_cap=self.exp.get("child_display_cap", 100),
+                                                also_expand=also_expand)
         return self._contexts[key]
+
+    def context_for(self, item, condition):
+        """Context for an item; two-concept questions (T6) also expand the second concept."""
+        also = (item.target_id,) if item.task in TWO_CONCEPT_TASKS and item.target_id else ()
+        return self.context(item.concept_id, condition, also)
 
     def repetitions(self, item):
         fraction = self.exp.get("repeat_subset_fraction", 0.0)
@@ -172,7 +178,7 @@ class Experiment:
             for item in self.items:
                 if ("R0", item.item_id, condition, fmt, 0) in done:
                     continue
-                context = self.context(item.concept_id, condition)
+                context = self.context_for(item, condition)
                 parsed = dict(reference_answer(item, context), parse_error=None, dropped_claims=0)
                 row = self._base_row(item, condition, fmt, context)
                 row.update({"model_name": "R0", "model_id": "deterministic-reference", "provider": "none",
@@ -196,7 +202,7 @@ class Experiment:
             if max_cost is not None and self.spent_usd >= max_cost:
                 logger.info("Stopping: spending reached US$%.4f (max_cost %.2f)", self.spent_usd, max_cost)
                 break
-            context = self.context(item.concept_id, condition)
+            context = self.context_for(item, condition)
             text = context.render(fmt if fmt != "none" else "plain")
             messages = build_messages(item, text, self._label)
             reference = reference_answer(item, context)
@@ -248,7 +254,7 @@ class Experiment:
                 fingerprints[spec["name"]] = None  # key not set yet: cannot check the cache
         summary = {}
         for spec, item, condition, fmt, rep in self.plan(models):
-            context = self.context(item.concept_id, condition)
+            context = self.context_for(item, condition)
             messages = build_messages(item, context.render(fmt if fmt != "none" else "plain"), self._label)
             entry = summary.setdefault(spec["name"], {"calls": 0, "prompt_tokens_est": 0,
                                                       "max_completion_tokens": 0, "already_cached": 0})

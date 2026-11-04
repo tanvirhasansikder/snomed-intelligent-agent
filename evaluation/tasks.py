@@ -14,7 +14,9 @@ from dataclasses import asdict, dataclass, field
 from evaluation.collect import ROOT_ID
 from explanation.citations import cite_for
 
-TASKS = ("T1", "T2", "T3", "T4", "T5")
+TASKS = ("T1", "T2", "T3", "T4", "T5", "T6")
+#: Tasks whose question involves a second concept that retrieval must also cover.
+TWO_CONCEPT_TASKS = ("T6",)
 MAX_GOLD_CHILDREN = 100
 
 
@@ -40,6 +42,10 @@ def generate_items(gold, tasks=TASKS, seed=0):
     """Deterministic items for every sampled concept with a usable closure."""
 
     items = []
+    by_hierarchy = {}
+    for cid in sorted(gold.samples):
+        by_hierarchy.setdefault(gold.samples[cid]["hierarchy_id"], []).append(cid)
+
     for concept_id in sorted(gold.samples):
         sample = gold.samples[concept_id]
         rng = random.Random(f"{seed}:{concept_id}")
@@ -89,7 +95,31 @@ def generate_items(gold, tasks=TASKS, seed=0):
         if "T5" in tasks:
             items.append(Item(f"T5:{concept_id}", "T5", concept_id, None, meta=dict(meta)))
 
+        if "T6" in tasks:
+            item = _t6_item(gold, concept_id, by_hierarchy.get(sample["hierarchy_id"], []), meta, seed)
+            if item:
+                items.append(item)
+
     return items
+
+
+def _t6_item(gold, concept_id, same_hierarchy, meta, seed):
+    """
+    Nearest common ancestor of X and a partner Z: another sampled concept of
+    the same hierarchy, neither an ancestor of the other (seeded choice).
+    Gold: the set of lowest common ancestors.
+    """
+    ancestors = gold.ancestors(concept_id)
+    partners = [z for z in same_hierarchy
+                if z != concept_id and z not in ancestors and concept_id not in gold.ancestors(z)]
+    if not partners:
+        return None
+    partner = random.Random(f"{seed}:T6:{concept_id}").choice(partners)
+    lcas = gold.lowest_common_ancestors(concept_id, partner)
+    if not lcas:
+        return None
+    return Item(f"T6:{concept_id}:{partner}", "T6", concept_id, lcas, target_id=partner,
+                meta=dict(meta, n_lca=len(lcas)))
 
 
 def sufficient(item, context):
@@ -110,6 +140,8 @@ def sufficient(item, context):
         return context.upward_path(x, item.target_id) is not None
     if item.task == "T5":
         return context.parents_complete(x) and context.children_complete(x)
+    if item.task == "T6":
+        return context.closure_complete(x) and context.closure_complete(item.target_id)
     raise ValueError(item.task)
 
 
@@ -169,6 +201,14 @@ def reference_answer(item, context):
             claim(x, "no_children")
         answer = "Template explanation generated from the retrieved evidence."
         insufficient = not sufficient(item, context)
+    elif item.task == "T6":
+        if sufficient(item, context):
+            answer = context.lowest_common_ancestors(x, item.target_id)
+            for a in answer:
+                claim(x, "ancestor", a)
+                claim(item.target_id, "ancestor", a)
+        else:
+            answer, insufficient = [], True
 
     edge_index = context.edge_index()
     for c in claims:  # R0 cites exactly the evidence edges that support each claim

@@ -275,7 +275,8 @@ def test_reference_system_is_perfect_under_full_retrieval(world):
     for item in generate_items(gold, seed=0):
         if item.task == "T5":
             continue
-        context = build_context(snapshot, item.concept_id, "FULL")
+        also = (item.target_id,) if item.task == "T6" else ()   # two-concept question: expand both
+        context = build_context(snapshot, item.concept_id, "FULL", also_expand=also)
         assert sufficient(item, context), item.item_id
         parsed = dict(reference_answer(item, context), parse_error=None, dropped_claims=0)
         row = score_answer(item, parsed, context, reference)

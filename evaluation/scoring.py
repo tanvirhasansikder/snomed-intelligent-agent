@@ -53,6 +53,12 @@ def _task_score(item, answer, reference, context, abstained=False):
         ok = (len(chain) >= 2 and chain[0] == x and chain[-1] == item.target_id and all(valid_steps))
         return {"score": float(ok), "edge_precision": (sum(valid_steps) / len(steps)) if steps else None,
                 "answered": bool(chain)}
+    if item.task == "T6":
+        if abstained or not answer:
+            return {"score": 0.0, "lca_f1": 0.0 if item.gold else None, "answered": False}
+        prf = set_prf(answer, item.gold)
+        return {"score": float(bool(set(answer) & set(item.gold))),  # hit: a correct LCA was given
+                "lca_f1": prf["f1"], "precision": prf["precision"], "recall": prf["recall"], "answered": True}
     return {}
 
 
@@ -77,6 +83,11 @@ def _verified_answer(item, parsed, context):
         ok = (len(chain) >= 2 and chain[0] == x and chain[-1] == item.target_id
               and all((a, b) in context.edges for a, b in zip(chain, chain[1:])))
         return (chain, False) if ok else ([], True)
+    if item.task == "T6":
+        z = item.target_id
+        common = context.ancestors_of(x) & context.ancestors_of(z)
+        kept = [a for a in (answer or []) if a in common]
+        return kept, not kept
     return answer, False
 
 
