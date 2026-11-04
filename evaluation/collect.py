@@ -195,6 +195,7 @@ def collect_closure(client, concept_id):
 
     for parent in parents:
         client.fetch_children(parent["concept_id"])
+        client.get_concept(parent["concept_id"])   # a T2 question can start at a direct parent (Amendment 4)
 
     return {
         "concept_id": concept_id,

@@ -79,7 +79,7 @@ H2, H3 and H4 are the primary hypotheses; H1 is secondary. Holm correction is ap
 | Task | Question | Gold (from the snapshot) | Primary score |
 | --- | --- | --- | --- |
 | T1 | Direct parents of X | set of IDs | set F1 (also P, R) |
-| T2 | Direct children of X (only where the gold child list is complete and has ≤ 100 children) | set, possibly empty | set F1; "no children" claims scored as absence claims |
+| T2 | Direct children of X, where X is the sampled concept's parent on the sampling walk (Amendment 4); one question per distinct parent, only where its gold child list is complete and has ≤ 100 children | set, possibly empty | set F1; "no children" claims scored as absence claims |
 | T3 | Is X a kind of Y? Positive: Y is an ancestor ≥ 2 steps away (the hierarchy's top concept excluded, as trivial). Negative: Y is a sibling of X. | yes / no | accuracy |
 | T4 | IS_A path from X to its top-level concept | every valid upward path | exact validity (valid chain reaching the target); edge precision; **edge F1** against the best-matching gold path |
 | T6 | Nearest common ancestor of X and Z, where Z is another sampled concept of the same hierarchy (seeded pairing) | set of lowest common ancestors (LCA set; can have more than one in a polyhierarchy) | hit (answer ∈ LCA set); set F1 when several are given |
@@ -240,7 +240,9 @@ The pilot checks parsing, quota, timing and bugs only. Analysis scripts are fixe
   * in the benchmark the question type is given to S1 (the UI's rule-based classifier is evaluated only informally);
   * for two-concept questions (T6), the fixed baselines B0/B1 also expand the second concept with their own settings, so S1's advantage is not an artefact of B1 ignoring the second concept;
   * B2, if run, sees more data than S1.
+* **Sampling:** the sampling walk usually ends at a leaf (all 12 pilot concepts were leaves), so T1, T3–T6 are asked mostly about leaf concepts, and T2 is asked about their parents (Amendment 4).
 * **Models:**
+  * **nondeterminism at temperature 0:** in the pilot, repetitions of the same request gave a different answer on 3–4 of 6 repeated items per system (including answering vs abstaining). Single-run differences between systems therefore include model noise; the repeated subset reports its size;
   * hosted models change behind fixed names; mitigated by non-preview identifiers, recorded responses and archived raw outputs;
   * a small model set (one, or optionally two, models).
 * **Provider and data:**
@@ -278,3 +280,9 @@ The pilot checks parsing, quota, timing and bugs only. Analysis scripts are fixe
   4. Each row records the model settings it was made with (`model_settings`). A row counts as finished only if these match the configuration, so rows made before a settings change (or before settings were recorded) are collected again, and the report keeps the latest row. This was found when the first re-run kept the 10 rows made at 800 tokens.
   5. The report keeps, for each model, only rows made with its latest settings, so an old answer cannot stand in for one whose retry failed (seen in the pilot when a retry got HTTP 503).
   6. Gemini's OpenAI-compatible endpoint did not report reasoning tokens in the pilot (`reasoning_tokens` empty in all rows), so hidden reasoning cannot be measured. The truncation rate is the check that the limit is high enough.
+
+* **Amendment 4 (2026-11-05, pilot review, before the protocol freeze).** The full pilot (64 items, 432 rows) had no errors, a 100% parse rate and no truncated answers. Reviewing it (operational checks only; no score was interpreted) found:
+  1. **Paging bug (fixed).** No T2 items were generated: every sampled concept's child list was stored as "0 children, incomplete" after 20 pages. A live check showed these are leaf concepts, and that BioPortal answers a leaf's `/children` with `"nextPage": null` but a non-empty `links.nextPage`. The client read the link, kept paging and marked the list incomplete, so leaves were also shown to the models as having a *partial* child list. The client now treats a top-level `nextPage` as authoritative and stops when `page >= pageCount`. Child lists of non-leaf concepts were paged correctly (checked live for all 12 parents). The pilot data are collected again with the fixed client, and the pilot is run again.
+  2. **T2 target (Section 5).** All 12 pilot concepts were leaves, so "children of the sampled concept" would always be the empty set. T2 now asks about the sampled concept's parent on the sampling walk, which has at least one child; one question per distinct parent. Collection also stores the direct parents' concept records (`get_concept`) so the retrieval can start there.
+  3. **Run order.** The pilot ran all B0 answers, then B1, S1 and S2. Mean API latency was 12.5 s for B0/B1 (00:45–01:21) and 3.1 s for S1 (01:21–01:28), so latency reflected the time of day. The runner now interleaves by item: B0, B1, S1, S2 on one item, then the next item (S1 still precedes S2). Interleaving spreads the API's time-of-day variation evenly over the systems; LLM latency is still reported as descriptive only, and live retrieval latency is measured separately (Section 7).
+  4. **Nondeterminism.** Repeated identical requests at temperature 0 differed on 3–4 of 6 items per system, in content and not only in order. This is added as a threat to validity (Section 11); the repeated-subset design is unchanged.

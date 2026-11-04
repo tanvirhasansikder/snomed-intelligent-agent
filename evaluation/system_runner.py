@@ -160,12 +160,17 @@ class SystemExperiment(Experiment):
         return written
 
     def plan_systems(self, models):
-        """(model_spec, system, item, repetition) still to run, S1 before S2 so S2 reuses S1's call."""
+        """
+        (model_spec, system, item, repetition) still to run, interleaved by
+        item (Amendment 4): every system answers one item before the next item
+        starts, so all systems meet the same API conditions over time. S1 comes
+        before S2 for each item, so S2 reuses S1's call.
+        """
         done = self._done(models)
         order = [s for s in LLM_SYSTEMS if s in self.systems]
         return [(spec, system, item, rep)
-                for spec in models for system in order for item in self.items
-                for rep in self.repetitions(item)
+                for spec in models for item in self.items for rep in self.repetitions(item)
+                for system in order
                 if (system, spec["name"], item.item_id, rep) not in done]
 
     def _metadata(self, item, system, context):

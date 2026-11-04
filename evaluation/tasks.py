@@ -37,10 +37,38 @@ class Item:
         return cls(**data)
 
 
+def t2_subject(sample):
+    """
+    The concept a T2 question asks about (Amendment 4): the sampled concept's
+    parent on the sampling walk. The walk usually stops at a leaf, so asking
+    for the sampled concept's own children would almost always have the
+    answer "none". The descent parent has at least one child (the sampled
+    concept), and its full child list is collected with the closure.
+    """
+    path = sample.get("descent_path") or []
+    return path[-2] if len(path) >= 2 else None
+
+
+def _t2_item(gold, concept_id, sample, meta, seen):
+    subject = t2_subject(sample)
+    if subject is None or subject in seen or subject not in gold.parents:
+        return None
+    children = gold.children.get(subject)
+    if children is None or subject not in gold.children_complete or len(children) > MAX_GOLD_CHILDREN:
+        return None
+    seen.add(subject)   # two samples can share a parent: one T2 question per parent
+    shortest, longest = gold.depth(subject)
+    item_meta = dict(meta, depth_min=shortest, depth_max=longest, n_parents=len(gold.parents.get(subject, [])),
+                     n_ancestors=len(gold.ancestors(subject)), n_children=len(children),
+                     sampled_concept=concept_id, t2_subject="descent_parent")
+    return Item(f"T2:{subject}", "T2", subject, sorted(children), meta=item_meta)
+
+
 def generate_items(gold, tasks=TASKS, seed=0):
     """Deterministic items for every sampled concept with a usable closure."""
 
     items = []
+    t2_subjects = set()
     by_hierarchy = {}
     for cid in sorted(gold.samples):
         by_hierarchy.setdefault(gold.samples[cid]["hierarchy_id"], []).append(cid)
@@ -64,11 +92,10 @@ def generate_items(gold, tasks=TASKS, seed=0):
         if "T1" in tasks:
             items.append(Item(f"T1:{concept_id}", "T1", concept_id, sorted(parents), meta=dict(meta)))
 
-        children = gold.children.get(concept_id)
-        if ("T2" in tasks and children is not None and concept_id in gold.children_complete
-                and len(children) <= MAX_GOLD_CHILDREN):
-            items.append(Item(f"T2:{concept_id}", "T2", concept_id, sorted(children),
-                              meta=dict(meta, n_children=len(children))))
+        if "T2" in tasks:
+            t2 = _t2_item(gold, concept_id, sample, meta, t2_subjects)
+            if t2 is not None:
+                items.append(t2)
 
         if "T3" in tasks:
             distances = gold.distance_to_ancestors(concept_id)

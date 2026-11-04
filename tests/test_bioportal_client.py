@@ -349,3 +349,37 @@ def test_pagination_that_does_not_advance_stops_and_is_partial():
 
     assert result["complete"] is False
     assert len(client.session.calls) == 1
+
+
+def test_leaf_children_are_complete_after_one_page():
+    """Live shape checked on 2026-11-05: an empty /children page with nextPage null but links.nextPage set."""
+    leaf = {"page": 1, "pageCount": 0, "totalCount": 0, "prevPage": None, "nextPage": None,
+            "links": {"nextPage": "https://data.bioontology.org/x/children?page=2"}, "collection": []}
+    client = make_client(lambda url, params: FakeResponse(200, dict(leaf, page=int(params.get("page", 1)))))
+
+    result = client.fetch_children(PNEUMONIA, max_pages=20)
+
+    assert result == {"children": [], "complete": True, "pages_fetched": 1}
+    assert len(client.session.calls) == 1
+
+
+def test_top_level_next_page_null_wins_over_links():
+    page = {"page": 1, "nextPage": None, "links": {"nextPage": "https://x/children?page=2"},
+            "collection": [bioportal_class("111111001", "One")]}
+    client = make_client(lambda url, params: FakeResponse(200, page))
+
+    result = client.fetch_children(PNEUMONIA, max_pages=5)
+
+    assert result["complete"] is True and len(client.session.calls) == 1
+
+
+def test_page_count_ends_paging_even_if_a_next_link_is_given():
+    pages = [
+        {"page": 1, "pageCount": 2, "nextPage": 2, "collection": [bioportal_class("111111001", "One")]},
+        {"page": 2, "pageCount": 2, "nextPage": 3, "collection": [bioportal_class("222222002", "Two")]},
+    ]
+    client = make_client(_paged_handler(pages))
+
+    result = client.fetch_children(PNEUMONIA, max_pages=5)
+
+    assert result["complete"] is True and len(result["children"]) == 2 and len(client.session.calls) == 2

@@ -447,6 +447,10 @@ class BioPortalClient:
                 raise BioPortalRequestError(f"Unexpected BioPortal response format ({endpoint})", endpoint=endpoint)
 
             items.extend(data["collection"])
+            page_count = data.get("pageCount")
+            if isinstance(page_count, int) and not isinstance(page_count, bool) and page >= page_count:
+                # last page by BioPortal's own count (0 for an empty list, e.g. a leaf's /children)
+                return items, True, pages_fetched
             next_page = self._next_page_number(data)
             if next_page is None:
                 return items, True, pages_fetched
@@ -462,14 +466,17 @@ class BioPortalClient:
         """
         Next page number from a paged response, or None on the last page.
 
-        BioPortal documents ``nextPage`` as a hypermedia link to follow; the
-        exact form (page number or URL, top level or under ``links``) was not
-        verified against the live API here, so all of them are accepted.
+        BioPortal documents ``nextPage`` as a hypermedia link to follow; a
+        number or a URL is accepted. A top-level ``nextPage`` is authoritative:
+        checked live on 2026-11-05, BioPortal answers a leaf's /children with
+        ``"nextPage": null`` but still fills ``links.nextPage``, so the links
+        are read only when the top-level key is absent.
         """
-        candidates = [data.get("nextPage")]
-        links = data.get("links")
-        if isinstance(links, dict):
-            candidates.append(links.get("nextPage"))
+        if "nextPage" in data:
+            candidates = [data["nextPage"]]
+        else:
+            links = data.get("links")
+            candidates = [links.get("nextPage")] if isinstance(links, dict) else []
         for value in candidates:
             if value is None or value is False or value == "":
                 continue
