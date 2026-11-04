@@ -52,10 +52,10 @@ def test_old_cache_entries_without_the_field_still_load(tmp_path):
     assert isinstance(response, LLMResponse) and response.cached and response.reasoning_tokens is None
 
 
-def test_pilot_and_main_configs_allow_2000_output_tokens():
+def test_pilot_and_main_configs_use_one_output_limit():
     for name in ("pilot.json", "main.json"):
         config = json.loads((ROOT / "configs" / name).read_text(encoding="utf-8"))
-        assert [m["max_tokens"] for m in config["models"]] == [2000] * len(config["models"]), name
+        assert len({m["max_tokens"] for m in config["models"]}) == 1, name
 
 
 def _row(item, finish, reasoning):
@@ -126,3 +126,31 @@ def test_report_never_keeps_an_old_settings_row_whose_retry_failed(tmp_path):
     assert kept[("B0", "a")]["error"] == "HTTP 503"
     assert kept[("B0", "b")]["answer"] == "new"
     assert kept[("R0-B1", "a")]["answer"] == "ref"
+
+
+# ----------------------------------------------------------------------
+# Amendment 5: a cut-off reply is a parse failure, not an empty answer
+# ----------------------------------------------------------------------
+
+from llm.reasoner import parse_answer  # noqa: E402
+
+
+def test_cut_off_reply_is_a_parse_failure_not_its_first_claim():
+    cut = ('{"answer": ["1001000", "1002000", "1003000"], "claims": [{"subject": "1001000", "relation": "child_of", '
+           '"object": "1000000", "source": "evidence", "cites": ["E1"]}, {"subject": "1002000", "relat')
+    parsed = parse_answer(cut, "T2")
+    assert parsed["parse_error"] is not None and "answer" in parsed["parse_error"]
+    assert parsed["answer"] is None and parsed["claims"] == []
+
+
+def test_complete_reply_still_parses_inside_text_or_fences():
+    reply = '{"answer": ["1001000"], "claims": [], "insufficient_evidence": false}'
+    for text in (reply, "Here it is:\n```json\n" + reply + "\n```", "note {\"x\": 1} then " + reply):
+        parsed = parse_answer(text, "T2")
+        assert parsed["parse_error"] is None and parsed["answer"] == ["1001000"], text
+
+
+def test_configs_allow_8192_output_tokens():
+    for name in ("pilot.json", "main.json"):
+        config = json.loads((ROOT / "configs" / name).read_text(encoding="utf-8"))
+        assert all(m["max_tokens"] == 8192 for m in config["models"]), name

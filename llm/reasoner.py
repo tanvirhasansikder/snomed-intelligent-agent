@@ -64,13 +64,15 @@ def _extract_json(text):
                     if depth == 0:
                         try:
                             value = json.loads(candidate[start:end + 1])
-                            if isinstance(value, dict):
+                            # only the reply object itself has "answer": a cut-off reply
+                            # must not be read as its first complete claim (pilot, Amendment 5)
+                            if isinstance(value, dict) and "answer" in value:
                                 return value
                         except json.JSONDecodeError:
                             pass
                         break
             start = candidate.find("{", start + 1)
-    raise ValueError("no JSON object found")
+    raise ValueError("no JSON object with an \"answer\" field (reply cut off or malformed)")
 
 
 def _as_id(value):

@@ -271,5 +271,5 @@ class SystemExperiment(Experiment):
             else:
                 entry["calls"] += 1
                 entry["prompt_tokens_est"] += tokens
-            entry["max_completion_tokens"] += spec.get("max_tokens", 2000)
+            entry["max_completion_tokens"] += spec.get("max_tokens", 8192)
         return summary

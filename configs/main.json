@@ -1,7 +1,7 @@
 {
   "name": "main",
   "_note": "Main study (protocol v2.0): 20 concepts per hierarchy (120), pilot concepts excluded. Change only through a dated amendment in docs/RESEARCH_PROTOCOL.md.",
-  "_note_models": "Model (protocol v2.0 Section 6): gemini-3.5-flash-lite through Google's OpenAI-compatible endpoint, key in .env as GEMINI_API_KEY. Settings verified by the M0 smoke test on 2026-11-04. Free tier on that date: 15 requests/min and 500/day, so rpm is 12. Optional open-weight second model, smoke-test first: {\"name\": \"gemma-31b\", \"provider\": \"gemini\", \"model\": \"gemma-4-31b-it\", \"temperature\": 0.0, \"max_tokens\": 2000, \"json_mode\": true, \"rpm\": 12, \"max_retries\": 1}.",
+  "_note_models": "Model (protocol v2.0 Section 6): gemini-3.5-flash-lite through Google's OpenAI-compatible endpoint, key in .env as GEMINI_API_KEY. Settings verified by the M0 smoke test on 2026-11-04. Free tier on that date: 15 requests/min and 500/day, so rpm is 12. Optional open-weight second model, smoke-test first: {\"name\": \"gemma-31b\", \"provider\": \"gemini\", \"model\": \"gemma-4-31b-it\", \"temperature\": 0.0, \"max_tokens\": 8192, \"json_mode\": true, \"rpm\": 12, \"max_retries\": 1}.",
   "cache_path": "data/bioportal_cache/calls.jsonl",
   "dataset_path": "data/datasets/main.json",
   "max_child_pages": 20,
@@ -43,7 +43,7 @@
       "provider": "gemini",
       "model": "gemini-3.5-flash-lite",
       "temperature": 0.0,
-      "max_tokens": 2000,
+      "max_tokens": 8192,
       "json_mode": true,
       "rpm": 12,
       "max_retries": 1,

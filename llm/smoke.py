@@ -127,7 +127,7 @@ def _main(argv=None):
     parser.add_argument("--list", action="store_true", help="List the models this key can use")
     parser.add_argument("--no-json-mode", action="store_true", help="Do not request JSON output mode")
     parser.add_argument("--reasoning-effort", help="Sent as reasoning_effort (e.g. none, low) if given")
-    parser.add_argument("--max-tokens", type=int, default=2000)
+    parser.add_argument("--max-tokens", type=int, default=8192)
     parser.add_argument("--rpm", type=float, default=10, help="Requests per minute (stay under free-tier limits)")
     parser.add_argument("--max-retries", type=int, default=1,
                         help="Retries per request on 429/5xx (low by default to protect free-tier quota)")

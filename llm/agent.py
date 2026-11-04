@@ -362,7 +362,7 @@ def _main(argv=None):
     from llm.providers import build_client
 
     spec = {"name": f"agent-{args.provider}", "provider": args.provider, "model": args.model,
-            "temperature": 0.0, "max_tokens": 2000, "json_mode": True, "rpm": 10, "max_retries": 1}
+            "temperature": 0.0, "max_tokens": 8192, "json_mode": True, "rpm": 10, "max_retries": 1}
     if args.reasoning_effort and args.provider != "mock":
         spec["extra_body"] = {"reasoning_effort": args.reasoning_effort}
     llm = build_client(spec)
