@@ -12,6 +12,7 @@ import random
 from dataclasses import asdict, dataclass, field
 
 from evaluation.collect import ROOT_ID
+from explanation.citations import cite_for
 
 TASKS = ("T1", "T2", "T3", "T4", "T5")
 MAX_GOLD_CHILDREN = 100
@@ -169,4 +170,7 @@ def reference_answer(item, context):
         answer = "Template explanation generated from the retrieved evidence."
         insufficient = not sufficient(item, context)
 
+    edge_index = context.edge_index()
+    for c in claims:  # R0 cites exactly the evidence edges that support each claim
+        c["cites"] = cite_for(c, edge_index)
     return {"answer": answer, "claims": claims, "insufficient_evidence": insufficient}

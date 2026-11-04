@@ -15,6 +15,7 @@ from collections import Counter
 
 from evaluation.metrics import set_prf
 from evaluation.sctid import is_valid_sctid
+from explanation.citations import check_citation, citation_counts
 from explanation.explainer import (
     CONTRADICTED,
     FALSE_IN_REFERENCE,
@@ -96,6 +97,9 @@ def score_answer(item, parsed, context, reference):
 
     evidence = context.evidence()
     claims = _label_claims(parsed["claims"], evidence, reference)
+    edge_index = context.edge_index()
+    for c in claims:
+        c["citation"] = check_citation(c, edge_index)
     labels = Counter(c["label"] for c in claims)
     n = len(claims)
 
@@ -129,6 +133,7 @@ def score_answer(item, parsed, context, reference):
         "n_false_absence": len(false_absence),
         "n_cited_ids": len(cited),
         "n_invalid_sctid": sum(1 for i in cited if not is_valid_sctid(i)),
+        **citation_counts(claims, SUPPORTED),
         "claims": claims,
     }
 

@@ -96,6 +96,7 @@ def run_smoke(client, fmt="v2"):
             "parse_error": parsed["parse_error"], "answer": parsed["answer"],
             "n_claims": scores["n_claims"], "n_unsupported": scores["n_claims"] - scores.get("n_supported_by_subgraph", 0),
             "n_cited_claims": sum(1 for c in parsed["claims"] if c.get("cites")),
+            "n_cite_entails": scores["n_cite_entails"], "n_cite_attempted": scores["n_cite_attempted"],
             "score": scores.get("score"), "raw_text": response.text,
         })
         rows.append(row)
@@ -109,7 +110,8 @@ def _print_rows(rows):
             continue
         score = "n/a" if r["score"] is None else f"{r['score']:.2f}"
         print(f"{r['task']}: parse_ok={r['parse_ok']} finish={r['finish_reason']} score={score} "
-              f"claims={r['n_claims']} cited={r['n_cited_claims']} unsupported={r['n_unsupported']} "
+              f"claims={r['n_claims']} cited={r['n_cited_claims']} "
+              f"citations_correct={r['n_cite_entails']}/{r['n_cite_attempted']} unsupported={r['n_unsupported']} "
               f"tokens={r['prompt_tokens']}/{r['completion_tokens']} latency={r['latency_s']}s")
         if not r["parse_ok"]:
             print(f"    parse error: {r['parse_error']}; start of reply: {r['raw_text'][:160]!r}")
