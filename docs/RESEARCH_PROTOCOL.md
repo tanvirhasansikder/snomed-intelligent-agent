@@ -46,7 +46,7 @@ These are claims to be tested, not results.
 | --- | --- | --- |
 | RQ1 | Without retrieval, how reliable are LLM statements about SNOMED CT hierarchy? | **H1:** closed-book (B0) false-claim and identifier-hallucination rates are above zero and rise with concept depth (trend test). |
 | RQ2 | Does question-aware retrieval improve correctness and faithfulness over upward-only retrieval? | **H2 (primary):** S1 scores higher than B1 and has a lower unsupported-claim rate, mainly on items where B1's evidence is insufficient (children, deep is-a, paths, common ancestors). |
-| RQ3 | How does retrieval completeness affect explanation reliability? | **H3 (primary):** within B1 and S1, items with insufficient evidence have higher unsupported-claim (fill-in) and false-claim rates than items with sufficient evidence. False absence claims ("X has no subtypes") occur mainly when children were not retrieved. |
+| RQ3 | How does retrieval completeness affect explanation reliability? | **H3 (primary):** within B1 and S1, items with insufficient evidence have higher unsupported-claim (fill-in) and false-claim rates than items with sufficient evidence (tested under `sufficient` and repeated under `answer_in_evidence`). False absence claims ("X has no subtypes") occur mainly when children were not retrieved. |
 | RQ4 | What does deterministic verification gain and cost? | **H4 (primary):** S2 has fewer items with a false claim than S1. Also reported, descriptively: claims removed, split into true-but-not-retrieved vs false (the price of strictness); change in task score; regeneration success rate. That S2 has no claims unsupported by its evidence is guaranteed by construction, so it is not tested. |
 | RQ5 | What are the trade-offs? | Descriptive: faithfulness vs completeness vs tokens vs latency vs BioPortal requests, per system. |
 
@@ -89,10 +89,14 @@ Every answer is JSON containing:
 * typed claims (`direct_parent`, `ancestor`, `no_children`, `no_parents`), each with `source: evidence | model_knowledge` and the **IDs of the evidence edges it cites**;
 * an `insufficient_evidence` flag.
 
-**Sufficiency** of each item under each system's evidence is computed deterministically. For example:
-* T1 is sufficient if X's parent list is complete;
-* a negative T3 item is sufficient only if X's full ancestor closure is present;
-* T6 is sufficient if both closures are present.
+**Two evidence labels per item and system** (Amendment 1), both computed deterministically:
+* **`sufficient`:** the evidence can *certify* the answer, using only the evidence and its coverage records. R0 answers only when this is true. For example:
+  * T1 is sufficient if X's parent list is complete;
+  * a negative T3 item is sufficient only if X's full ancestor closure is present;
+  * T6 is sufficient only if both closures are present, because in a polyhierarchy a second lowest common ancestor may lie beyond a depth limit.
+* **`answer_in_evidence`:** the evidence *contains* the full gold answer. This is computed in evaluation from the frozen gold, which no system sees. It differs from `sufficient` mainly for T6, where both concepts can reach their lowest common ancestor inside the window even though the window cannot rule out a second one. It also differs for T1 and T2 when the list is present but its completeness was not recorded.
+
+RQ3 results are reported under both labels.
 
 ## 6. Systems
 
@@ -230,8 +234,10 @@ The pilot checks parsing, quota, timing and bugs only. Analysis scripts are fixe
   * the gold is a BioPortal snapshot, not an RF2 release, and is checked against `/ancestors` for consistency.
 * **Task design:**
   * template questions differ from real user questions;
+  * **lexical cues:** concept labels can reveal hierarchy (e.g. "Bacterial pneumonia" contains "Pneumonia"), so a model may infer an unretrieved relationship from the label rather than from memorised knowledge. Such fill-in still counts as unsupported by the evidence. Where the gold confirms it, it is counted as true-but-not-retrieved; we do not claim to separate lexical inference from recall. The synthetic test ontology encodes its hierarchy in labels and is used only for software testing;
   * one fixed prompt per task;
   * in the benchmark the question type is given to S1 (the UI's rule-based classifier is evaluated only informally);
+  * for two-concept questions (T6), the fixed baselines B0/B1 also expand the second concept with their own settings, so S1's advantage is not an artefact of B1 ignoring the second concept;
   * B2, if run, sees more data than S1.
 * **Models:**
   * hosted models change behind fixed names; mitigated by non-preview identifiers, recorded responses and archived raw outputs;
@@ -252,3 +258,8 @@ The pilot checks parsing, quota, timing and bugs only. Analysis scripts are fixe
   2. **Question types:** T6 (nearest common ancestor) added. Edge F1, citation precision/recall, unlisted-ID mentions and efficiency metrics added.
   3. **Models:** Gemini replaces OpenRouter. `gemini-2.5-flash` is unavailable to new users, and `gemini-3.8-flash` allows only 20 requests per day on the free tier. `gemini-3.5-flash-lite` was chosen; Gemma 4 31B is optional. The OpenRouter configurations are retired at M2.
   4. **Scope:** sample size 180 → 120 concepts and pilot 30 → 12 (schedule and quota); human evaluation reduced to one annotator with a test–retest check; the licensing section is replaced by data-handling rules (licensing is handled by the author).
+
+* **Amendment 1 (2026-11-04, during implementation, before any data or experimental call).** Reason: a synthetic test run showed B1 answering a T6 question correctly from evidence that was labelled insufficient.
+  1. The `answer_in_evidence` label was added alongside `sufficient` (Section 5), and RQ3 is reported under both.
+  2. B0/B1 expand both concepts of a T6 question (Section 11).
+  3. Lexical cues were added as a threat to validity (Section 11).

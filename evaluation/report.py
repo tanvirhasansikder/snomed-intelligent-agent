@@ -6,7 +6,8 @@ Analysis of experiment results (protocol Section 8).
 Reads ``<results_dir>/responses.jsonl`` and writes to ``<results_dir>/analysis/``:
 
 * summary.csv           per model x condition x format x task
-* summary_by_sufficiency.csv
+* summary_by_sufficiency.csv          stratified by "evidence can certify the answer"
+* summary_by_answer_in_evidence.csv   stratified by "evidence contains the full gold answer"
 * hypotheses.csv        pre-registered tests with Holm-adjusted p-values
 * rq4_verification.csv  what deterministic verification removes and costs
 * table_main.tex        LaTeX table for the paper
@@ -58,14 +59,20 @@ def _ci(values):
     return (None, None) if ci is None else (ci["lower"], ci["upper"])
 
 
-def summarise(rows, by_sufficiency=False):
+def summarise(rows, by_sufficiency=False, stratify_by=None):
+    """
+    Summary per (model, condition, format, task). ``by_sufficiency`` adds the
+    ``sufficient`` label to the key; ``stratify_by`` adds any other row label
+    instead (e.g. "answer_in_evidence").
+    """
+    label = stratify_by or ("sufficient" if by_sufficiency else None)
     groups = defaultdict(list)
     for r in rows:
         if r.get("repetition", 0) != 0:
             continue
         key = (r["model_name"], r["condition"], r["format"], r["task"])
-        if by_sufficiency:
-            key += (r.get("sufficient"),)
+        if label:
+            key += (r.get(label),)
         groups[key].append(r)
 
     out = []
@@ -101,8 +108,8 @@ def summarise(rows, by_sufficiency=False):
             "mean_latency_s": _mean([r.get("latency_s") for r in ok]),
             "cost_usd": round(sum(r.get("cost_usd") or 0.0 for r in ok), 6),
         }
-        if by_sufficiency:
-            row["sufficient"] = key[4]
+        if label:
+            row[label] = key[4]
         out.append(row)
     return out
 
@@ -343,6 +350,7 @@ def _main(argv=None):
     summary = summarise(rows)
     _write_csv(out / "summary.csv", summary)
     _write_csv(out / "summary_by_sufficiency.csv", summarise(rows, by_sufficiency=True))
+    _write_csv(out / "summary_by_answer_in_evidence.csv", summarise(rows, stratify_by="answer_in_evidence"))
     tests = hypothesis_tests(rows)
     _write_csv(out / "hypotheses.csv", tests)
     _write_csv(out / "rq4_verification.csv", verification_table(rows))

@@ -122,6 +122,27 @@ def _t6_item(gold, concept_id, same_hierarchy, meta, seed):
                 meta=dict(meta, n_lca=len(lcas)))
 
 
+def answer_in_evidence(item, context):
+    """
+    True if the evidence CONTAINS the full gold answer (evaluation only: it
+    uses the item's gold, which no system sees). Differs from ``sufficient``
+    where the evidence can hold the right answer without being able to
+    certify it. For example, in T6 both concepts can reach their lowest
+    common ancestor inside the retrieved window while a second LCA could, in
+    principle, lie beyond it. RQ3 analyses are reported under both labels.
+    """
+    x = item.concept_id
+    if context.condition == "C0":
+        return False
+    if item.task == "T1":
+        return set(item.gold or []) <= set(context.parents_of(x)) and (bool(item.gold) or context.parents_complete(x))
+    if item.task == "T2":
+        return set(item.gold or []) <= set(context.children_of(x)) and (bool(item.gold) or context.children_complete(x))
+    if item.task == "T6":
+        return set(context.lowest_common_ancestors(x, item.target_id)) == set(item.gold or [])
+    return sufficient(item, context)  # T3, T4, T5: containing the answer and certifying it coincide
+
+
 def sufficient(item, context):
     """True if the context alone determines the gold answer (deterministic)."""
 

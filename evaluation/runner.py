@@ -22,7 +22,9 @@ from evaluation.collect import PROJECT_ROOT, git_revision, load_config, resolve
 from evaluation.conditions import CONDITIONS, build_context
 from evaluation.gold import GoldIndex
 from evaluation.scoring import score_answer
-from evaluation.tasks import TASKS, TWO_CONCEPT_TASKS, generate_items, reference_answer, sufficient
+from evaluation.tasks import (
+    TASKS, TWO_CONCEPT_TASKS, answer_in_evidence, generate_items, reference_answer, sufficient,
+)
 from llm.client import CachedClient, LLMError, ResponseCache, estimate_tokens
 from llm.prompt_manager import PROMPT_VERSION, build_messages
 from llm.providers import build_client
@@ -133,6 +135,7 @@ class Experiment:
             "condition": condition,
             "format": fmt,
             "sufficient": sufficient(item, context),
+            "answer_in_evidence": answer_in_evidence(item, context),
             "context_nodes": len(context.nodes),
             "context_edges": len(context.edges),
         }
