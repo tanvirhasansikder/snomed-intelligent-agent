@@ -94,6 +94,7 @@ class AgentResult:
     model: str = None
     prompt_tokens: int = None
     completion_tokens: int = None
+    reasoning_tokens: int = None
     llm_latency_s: float = None
     finish_reason: str = None
     raw_text: str = None
@@ -110,6 +111,7 @@ class AgentResult:
     final: dict = None                # answer, insufficient_evidence, claims, removed_claims, ...
     total_prompt_tokens: int = None
     total_completion_tokens: int = None
+    total_reasoning_tokens: int = None
     total_llm_latency_s: float = None
 
     def to_dict(self):
@@ -219,6 +221,7 @@ class HierarchyAgent:
         result.model = response.model
         result.prompt_tokens = response.prompt_tokens
         result.completion_tokens = response.completion_tokens
+        result.reasoning_tokens = getattr(response, "reasoning_tokens", None)
         result.llm_latency_s = response.latency_s
         result.finish_reason = response.finish_reason
         result.raw_text = response.text
@@ -232,6 +235,7 @@ class HierarchyAgent:
                                      if c["citation"] in ("not_entailed", "invalid_edge_id"))
         result.total_prompt_tokens = response.prompt_tokens
         result.total_completion_tokens = response.completion_tokens
+        result.total_reasoning_tokens = result.reasoning_tokens
         result.total_llm_latency_s = response.latency_s
 
     def _verify_and_regenerate(self, result, item, context, messages, label_of):
@@ -256,7 +260,8 @@ class HierarchyAgent:
                 left = find_problems(item, dict(parsed, claims=claims), claims)
                 regen.update({
                     "model": response.model, "prompt_tokens": response.prompt_tokens,
-                    "completion_tokens": response.completion_tokens, "latency_s": response.latency_s,
+                    "completion_tokens": response.completion_tokens,
+                    "reasoning_tokens": getattr(response, "reasoning_tokens", None), "latency_s": response.latency_s,
                     "finish_reason": response.finish_reason, "raw_text": response.text,
                     "parse_error": parsed["parse_error"],
                     "problems_left": {k: len(v) for k, v in left.items()},
@@ -265,6 +270,8 @@ class HierarchyAgent:
                     chosen_parsed, chosen_claims = dict(parsed, claims=claims), claims
                 result.total_prompt_tokens = _add(result.total_prompt_tokens, response.prompt_tokens)
                 result.total_completion_tokens = _add(result.total_completion_tokens, response.completion_tokens)
+                result.total_reasoning_tokens = _add(result.total_reasoning_tokens,
+                                                     getattr(response, "reasoning_tokens", None))
                 result.total_llm_latency_s = _add(result.total_llm_latency_s, response.latency_s)
             result.regeneration = regen
 
@@ -355,7 +362,7 @@ def _main(argv=None):
     from llm.providers import build_client
 
     spec = {"name": f"agent-{args.provider}", "provider": args.provider, "model": args.model,
-            "temperature": 0.0, "max_tokens": 800, "json_mode": True, "rpm": 10, "max_retries": 1}
+            "temperature": 0.0, "max_tokens": 2000, "json_mode": True, "rpm": 10, "max_retries": 1}
     if args.reasoning_effort and args.provider != "mock":
         spec["extra_body"] = {"reasoning_effort": args.reasoning_effort}
     llm = build_client(spec)

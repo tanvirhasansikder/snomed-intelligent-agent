@@ -44,17 +44,32 @@ N_RESAMPLES, SEED = 1000, 0
 # ----------------------------------------------------------------------
 
 def load_system_rows(path):
-    """Latest row per (system, model, item, repetition); a successful row wins over a failed one."""
-    best = {}
+    """
+    Latest row per (system, model, item, repetition); a successful row wins over a failed one.
+
+    Amendment 3: for each model, only rows made with that model's latest
+    recorded settings (``model_settings``) are kept, so an answer made before a
+    settings change can never stand in for one whose retry failed. Models that
+    never recorded settings (R0, older runs) are kept as they are.
+    """
+    rows = []
     with Path(path).open(encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
-            if not line:
-                continue
-            row = json.loads(line)
-            key = (row["system"], row["model_name"], row["item_id"], row.get("repetition", 0))
-            if key not in best or best[key].get("error") is not None or row.get("error") is None:
-                best[key] = row
+            if line:
+                rows.append(json.loads(line))
+    latest_settings = {}
+    for row in rows:
+        if row.get("model_settings") is not None:
+            latest_settings[row["model_name"]] = row["model_settings"]
+    best = {}
+    for row in rows:
+        name = row["model_name"]
+        if name in latest_settings and row.get("model_settings") != latest_settings[name]:
+            continue
+        key = (row["system"], name, row["item_id"], row.get("repetition", 0))
+        if key not in best or best[key].get("error") is not None or row.get("error") is None:
+            best[key] = row
     return list(best.values())
 
 
@@ -179,6 +194,8 @@ def _summary_row(key_fields, rows):
         "mean_retrieval_requests": _mean([r.get("retrieval_requests") for r in ok]),
         "mean_prompt_tokens": _mean([r.get("prompt_tokens") for r in ok]),
         "mean_completion_tokens": _mean([r.get("completion_tokens") for r in ok]),
+        "mean_reasoning_tokens": _mean([r.get("reasoning_tokens") for r in ok]),
+        "truncated_rate": _rate(sum(1 for r in ok if r.get("finish_reason") == "length"), len(ok)),
         "mean_llm_latency_s": _mean([r.get("latency_s") for r in ok]),
         "mean_llm_calls": _mean([r.get("n_llm_calls") for r in ok]),
         "regeneration_rate": _rate(sum(1 for r in s2 if r.get("regenerated")), len(s2)) if s2 else None,
@@ -337,7 +354,7 @@ def verification_targets(rows):
 def tradeoffs(summary):
     keep = ("model", "system", "score", "unsupported_claim_rate", "false_claim_rate", "abstention_rate",
             "citation_precision", "mean_retrieval_requests", "mean_prompt_tokens", "mean_completion_tokens",
-            "mean_llm_latency_s", "mean_llm_calls", "cost_usd")
+            "mean_reasoning_tokens", "truncated_rate", "mean_llm_latency_s", "mean_llm_calls", "cost_usd")
     return [{k: s.get(k) for k in keep} for s in summary if s["task"] == "ALL"]
 
 

@@ -48,9 +48,22 @@ class LLMResponse:
     cached: bool = False
     served_by: str = None   # upstream provider reported by a router such as OpenRouter
     cost_usd: float = None  # cost reported by the provider, when it reports one
+    reasoning_tokens: int = None  # hidden "thinking" tokens, when the provider reports them
 
     def to_dict(self):
         return asdict(self)
+
+
+def _reasoning_tokens(usage):
+    """
+    Hidden reasoning tokens from an OpenAI-style ``usage`` block
+    (``completion_tokens_details.reasoning_tokens``), or None if absent.
+    They count against max_tokens but not always against completion_tokens,
+    which is how a short answer can still end with finish_reason "length".
+    """
+    details = usage.get("completion_tokens_details")
+    value = details.get("reasoning_tokens") if isinstance(details, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def estimate_tokens(text):
@@ -198,6 +211,7 @@ class OpenAICompatibleClient:
                         finish_reason=choice.get("finish_reason"),
                         served_by=data.get("provider") if isinstance(data.get("provider"), str) else None,
                         cost_usd=usage.get("cost") if isinstance(usage.get("cost"), (int, float)) else None,
+                        reasoning_tokens=_reasoning_tokens(usage),
                     )
                 except (ValueError, KeyError, IndexError, TypeError):
                     raise LLMError(f"{self.name}: unexpected response format") from None

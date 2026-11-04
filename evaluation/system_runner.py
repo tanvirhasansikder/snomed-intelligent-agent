@@ -39,6 +39,13 @@ logger = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = "2.0"
 LLM_SYSTEMS = ("B0", "B1", "S1", "S2")
+#: model settings that change an answer; a row counts as finished only if they match the configuration
+SETTING_KEYS = ("provider", "model", "temperature", "max_tokens", "json_mode", "seed", "extra_body")
+
+
+def model_settings(spec):
+    """The answer-changing settings of one model specification (no secrets)."""
+    return {k: spec.get(k) for k in SETTING_KEYS}
 #: R0 variants: system name -> evidence it answers from
 R0_VARIANTS = {"R0-B1": "B1", "R0-S1": "S1"}
 
@@ -110,7 +117,14 @@ class SystemExperiment(Experiment):
             "context_edges": len(context.edges),
         }
 
-    def _done(self):
+    def _done(self, models=()):
+        """
+        Keys of finished rows. For a model in ``models``, a row only counts if it
+        was made with the same settings (Amendment 3: rows made before a settings
+        change, or before settings were recorded, are collected again; the report
+        keeps the latest row).
+        """
+        current = {spec["name"]: model_settings(spec) for spec in models}
         done = set()
         if self.responses_path.exists():
             with self.responses_path.open(encoding="utf-8") as handle:
@@ -118,6 +132,8 @@ class SystemExperiment(Experiment):
                     try:
                         r = json.loads(line)
                     except json.JSONDecodeError:
+                        continue
+                    if r.get("model_name") in current and r.get("model_settings") != current[r["model_name"]]:
                         continue
                     if r.get("error") is None:
                         done.add((r["system"], r["model_name"], r["item_id"], r["repetition"]))
@@ -145,7 +161,7 @@ class SystemExperiment(Experiment):
 
     def plan_systems(self, models):
         """(model_spec, system, item, repetition) still to run, S1 before S2 so S2 reuses S1's call."""
-        done = self._done()
+        done = self._done(models)
         order = [s for s in LLM_SYSTEMS if s in self.systems]
         return [(spec, system, item, rep)
                 for spec in models for system in order for item in self.items
@@ -181,7 +197,8 @@ class SystemExperiment(Experiment):
 
             row = self._row(item, system, spec["name"], rep, context, requests)
             row.update({"model_id": spec.get("model"), "provider": spec["provider"],
-                        "temperature": spec.get("temperature", 0.0), "requested_at": started})
+                        "temperature": spec.get("temperature", 0.0), "requested_at": started,
+                        "model_settings": model_settings(spec)})
             new_calls = [r for r in llm.responses if not r.cached]
             cost = sum(call_cost(spec, r) or 0.0 for r in new_calls)
             row.update({"n_llm_calls": len(llm.responses), "n_new_calls": len(new_calls),
@@ -204,6 +221,7 @@ class SystemExperiment(Experiment):
             row.update({
                 "error": None, "response_model": result.model,
                 "prompt_tokens": result.total_prompt_tokens, "completion_tokens": result.total_completion_tokens,
+                "reasoning_tokens": result.total_reasoning_tokens,
                 "latency_s": result.total_llm_latency_s, "finish_reason": result.finish_reason,
                 "first_prompt_tokens": result.prompt_tokens, "first_completion_tokens": result.completion_tokens,
                 "raw_text": result.raw_text,
@@ -248,5 +266,5 @@ class SystemExperiment(Experiment):
             else:
                 entry["calls"] += 1
                 entry["prompt_tokens_est"] += tokens
-            entry["max_completion_tokens"] += spec.get("max_tokens", 800)
+            entry["max_completion_tokens"] += spec.get("max_tokens", 2000)
         return summary

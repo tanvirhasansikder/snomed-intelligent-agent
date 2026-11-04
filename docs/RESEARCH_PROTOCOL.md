@@ -137,7 +137,7 @@ There is a request budget per question (default 60 BioPortal requests). If the b
 We use deterministic external feedback because intrinsic self-correction without such feedback is unreliable (Huang et al., ICLR 2024; compare the self-verification approach of Dhuliawala et al., Findings of ACL 2024). Generated claims never modify the stored graph.
 
 **Models:**
-* **Primary:** `gemini-3.5-flash-lite` through Google's OpenAI-compatible endpoint, temperature 0, `reasoning_effort=low`, JSON mode, max 800 output tokens. It is a fixed, non-preview identifier and passed the M0 smoke test on 2026-11-04 (synthetic evidence only).
+* **Primary:** `gemini-3.5-flash-lite` through Google's OpenAI-compatible endpoint, temperature 0, `reasoning_effort=low`, JSON mode, max 2,000 output tokens (800 before Amendment 3). It is a fixed, non-preview identifier and passed the M0 smoke test on 2026-11-04 (synthetic evidence only).
 * **Optional second model (open weights):** `gemma-4-31b-it` through the same API. To be smoke-tested first.
 * Every call records the model ID returned, settings, prompt version, tokens, latency, finish reason and raw output.
 * **Nondeterminism:** 3 repetitions on a random 10% of items.
@@ -270,3 +270,11 @@ The pilot checks parsing, quota, timing and bugs only. Analysis scripts are fixe
   2. Depth is measured to the hierarchy's top concept (a concept whose retrieved parent list is empty) instead of to 138875005 (Section 4).
   3. T3 positive targets exclude that top concept instead of the root (Section 5).
   The synthetic test ontology keeps a root and is unaffected.
+
+* **Amendment 3 (2026-11-05, pilot, after the first 10 calls and before the full pilot run).** Reason: one of the first 10 pilot answers (B0, T5) stopped with `finish_reason=length` after only 192 reported completion tokens, below the 800-token limit. The likely cause is hidden reasoning tokens, which count against the limit but are not included in the reported completion tokens. These 10 answers were inspected for errors, parsing and timing only; no score was computed.
+  1. `max_tokens` is raised from 800 to 2,000 for every model in the pilot and main configurations. The limit is part of the cache key, so the 10 earlier answers are requested again and are not used.
+  2. Each call records the hidden reasoning tokens when the provider reports them (`reasoning_tokens`). The report adds the mean reasoning tokens and the truncation rate (`finish_reason=length`) per system.
+  3. Truncated answers stay in the analysis and are scored as they are (an unparseable answer counts as wrong). The truncation rate is reported for every system.
+  4. Each row records the model settings it was made with (`model_settings`). A row counts as finished only if these match the configuration, so rows made before a settings change (or before settings were recorded) are collected again, and the report keeps the latest row. This was found when the first re-run kept the 10 rows made at 800 tokens.
+  5. The report keeps, for each model, only rows made with its latest settings, so an old answer cannot stand in for one whose retry failed (seen in the pilot when a retry got HTTP 503).
+  6. Gemini's OpenAI-compatible endpoint did not report reasoning tokens in the pilot (`reasoning_tokens` empty in all rows), so hidden reasoning cannot be measured. The truncation rate is the check that the limit is high enough.
