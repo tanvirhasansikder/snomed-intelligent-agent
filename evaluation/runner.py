@@ -315,6 +315,8 @@ def _main(argv=None):
 
     config = load_config(args.config)
     models = [m for m in config.get("models", []) if not args.models or m["name"] in args.models]
+    if "systems" in config.get("experiment", {}):
+        return _main_systems(config, models, args)
     experiment = Experiment(config)
     print(f"Items: {len(experiment.items)} | concepts: {len({i.concept_id for i in experiment.items})} | "
           f"cells: {len(list(experiment.cells()))} | models: {[m['name'] for m in models]}")
@@ -339,6 +341,33 @@ def _main(argv=None):
     print(f"R0 rows written: {experiment.run_reference()}")
     llm_cache = ResponseCache(resolve(config, "llm_cache_path"))
     made = experiment.run_models(models, llm_cache, max_calls=args.max_calls, max_cost=args.max_cost)
+    print(f"New API calls: {made}. Spent this run: ~US${experiment.spent_usd:.4f}. "
+          f"Results: {experiment.responses_path}")
+
+
+def _main_systems(config, models, args):
+    """Protocol v2.0: systems R0/B0/B1/S1/S2 through the shared pipeline (evaluation/system_runner.py)."""
+    from evaluation.system_runner import SystemExperiment
+
+    logging.getLogger("crawler").setLevel(logging.ERROR)  # budget refusals are recorded in the evidence, not logged
+    experiment = SystemExperiment(config)
+    print(f"Items: {len(experiment.items)} | concepts: {len({i.concept_id for i in experiment.items})} | "
+          f"systems: {experiment.systems} | models: {[m['name'] for m in models]}")
+    if args.dry_run:
+        for name, entry in experiment.estimate_systems(models).items():
+            print(f"{name}: up to {entry['calls']} new calls (S2 counted as one regeneration each), "
+                  f"~{entry['prompt_tokens_est']:,} prompt tokens, <= {entry['max_completion_tokens']:,} completion tokens")
+        return
+    run_info = {"config": {k: v for k, v in config.items() if not k.startswith("_")}, "runner": "systems",
+                "code_revision": git_revision(), "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "dataset_release": experiment.dataset.get("release"),
+                "dataset_synthetic": experiment.dataset.get("synthetic")}
+    experiment.results_dir.mkdir(parents=True, exist_ok=True)
+    with (experiment.results_dir / "runs.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(run_info, default=str) + "\n")
+    print(f"R0 rows written: {experiment.run_reference()}")
+    llm_cache = ResponseCache(resolve(config, "llm_cache_path"))
+    made = experiment.run_systems(models, llm_cache, max_calls=args.max_calls, max_cost=args.max_cost)
     print(f"New API calls: {made}. Spent this run: ~US${experiment.spent_usd:.4f}. "
           f"Results: {experiment.responses_path}")
 

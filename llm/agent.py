@@ -178,17 +178,25 @@ class HierarchyAgent:
         return (concept or {}).get("prefLabel") or concept_id
 
     # ------------------------------------------------------------------
-    def answer(self, item, system):
-        """Run one question end to end and return an AgentResult."""
+    def answer(self, item, system, context=None, retrieval_requests=None):
+        """
+        Run one question end to end and return an AgentResult. A caller that
+        has already retrieved (the benchmark runner, which shares one
+        retrieval between S1 and S2) passes ``context`` and the number of
+        requests it took.
+        """
         result = AgentResult(system=system, item_id=item.item_id, task=item.task,
                              concept_id=item.concept_id, target_id=item.target_id,
                              retrieval=RETRIEVAL.get(system))
 
-        before = getattr(self.retrieval_client, "request_count", 0)
-        started = time.perf_counter()
-        context = self.retrieve(item, system)
-        result.retrieval_seconds = round(time.perf_counter() - started, 3)
-        result.retrieval_requests = getattr(self.retrieval_client, "request_count", 0) - before
+        if context is None:
+            before = getattr(self.retrieval_client, "request_count", 0)
+            started = time.perf_counter()
+            context = self.retrieve(item, system)
+            result.retrieval_seconds = round(time.perf_counter() - started, 3)
+            result.retrieval_requests = getattr(self.retrieval_client, "request_count", 0) - before
+        else:
+            result.retrieval_requests = retrieval_requests
 
         result.evidence_text = context.render(self.evidence_format)
         result.edge_index = context.edge_index()
@@ -264,7 +272,7 @@ class HierarchyAgent:
 
 
 def _add(a, b):
-    return None if a is None and b is None else (a or 0) + (b or 0)
+    return None if a is None and b is None else round((a or 0) + (b or 0), 3)
 
 
 def _claim_summary(claim):
