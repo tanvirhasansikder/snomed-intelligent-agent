@@ -343,6 +343,15 @@ def _main(argv=None):
     args = parser.parse_args(argv)
     config = load_config(args.config)
     results_dir = resolve(config, "results_dir")
+    if "systems" in config.get("experiment", {}):
+        from evaluation.system_report import write_report
+
+        info = write_report(results_dir)
+        print(f"Rows: {info['rows']} | summary cells: {info['summary_cells']} | tests: {info['tests']}")
+        print(f"Written to {info['out']}")
+        if info["synthetic"]:
+            print("NOTE: results include the MockLLM. They test the pipeline only and are not findings.")
+        return
     rows = load_rows(results_dir / "responses.jsonl")
     out = results_dir / "analysis"
     out.mkdir(parents=True, exist_ok=True)
