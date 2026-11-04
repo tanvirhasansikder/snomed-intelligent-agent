@@ -165,7 +165,7 @@ class SystemExperiment(Experiment):
         clients = {spec["name"]: CachedClient(build_client(spec), llm_cache) for spec in models}
         plan = self.plan_systems(models)
         logger.info("%d system answers to collect", len(plan))
-        made, self.spent_usd = 0, 0.0
+        made, self.spent_usd, self.stopped_reason = 0, 0.0, None
         for spec, system, item, rep in plan:
             if max_calls is not None and made >= max_calls:
                 logger.info("Stopping after %d new calls (max_calls)", made)
@@ -193,6 +193,12 @@ class SystemExperiment(Experiment):
                 row["error"] = result.error
                 self._write(row)
                 logger.warning("%s/%s on %s: %s", spec["name"], system, item.item_id, result.error)
+                if "daily quota exhausted" in result.error:
+                    # every further call would fail the same way: stop, and resume after the quota resets
+                    self.stopped_reason = "daily quota exhausted"
+                    logger.warning("Stopping: the provider's daily quota is used up. Run the same command again "
+                                   "after it resets; finished answers are kept and never repeated.")
+                    break
                 continue
 
             row.update({

@@ -105,3 +105,36 @@ def test_unknown_system_is_rejected(data):
     data["experiment"]["systems"] = ["R0", "S9"]
     with pytest.raises(ValueError):
         SystemExperiment(data)
+
+
+def test_run_stops_when_daily_quota_is_exhausted(data, monkeypatch):
+    from evaluation import system_runner
+    from llm.client import LLMError
+
+    class QuotaGone:
+        name, model = "fake", "fake-1"
+
+        def request_fingerprint(self):
+            return {"provider": "fake"}
+
+        def complete(self, messages, metadata=None):
+            raise LLMError("fake: daily quota exhausted (HTTP 429: GenerateRequestsPerDay)")
+
+    monkeypatch.setattr(system_runner, "build_client", lambda spec: QuotaGone())
+    experiment = SystemExperiment(data)
+    made = experiment.run_systems(data["models"], ResponseCache(data["llm_cache_path"]))
+    rows = [json.loads(line) for line in experiment.responses_path.read_text(encoding="utf-8").splitlines()]
+    assert made == 0 and len(rows) == 1 and experiment.stopped_reason == "daily quota exhausted"
+
+
+def test_pilot_and_main_configs_use_v2_systems():
+    from evaluation.collect import load_config
+
+    for name in ("pilot", "main"):
+        config = load_config(f"configs/{name}.json")
+        assert config["experiment"]["systems"] == ["R0", "B0", "B1", "S1", "S2"]
+        assert config["experiment"]["tasks"] == ["T1", "T2", "T3", "T4", "T5", "T6"]
+        assert config["models"][0]["model"] == "gemini-3.5-flash-lite"
+        assert config["models"][0]["extra_body"] == {"reasoning_effort": "low"}
+    assert load_config("configs/pilot.json")["data"]["per_hierarchy"] == 2
+    assert load_config("configs/main.json")["data"]["exclude_samples_from"] == ["data/datasets/pilot.json"]

@@ -370,6 +370,8 @@ def _main_systems(config, models, args):
     made = experiment.run_systems(models, llm_cache, max_calls=args.max_calls, max_cost=args.max_cost)
     print(f"New API calls: {made}. Spent this run: ~US${experiment.spent_usd:.4f}. "
           f"Results: {experiment.responses_path}")
+    if experiment.stopped_reason:
+        print(f"STOPPED EARLY: {experiment.stopped_reason}. Run the same command again later to continue.")
 
 
 if __name__ == "__main__":
