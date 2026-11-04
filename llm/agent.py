@@ -22,14 +22,15 @@ snapshot, a claim that is true but not retrieved cannot be told apart from a
 false one. That three-way distinction is made later, in evaluation, against
 the reference.
 
-Systems available in M1:
+Systems:
 
 * ``B0``  closed book: no retrieval
 * ``B1``  upward-only retrieval, the app's current crawler (BFS depth 2, no
           children)
+* ``S1``  question-aware retrieval with a request budget
+          (query_engine/retrieval_planner.py)
 
-S1 (question-aware retrieval) and S2 (verification plus controlled
-regeneration) are added in M2 through ``RETRIEVAL`` and ``answer()``.
+S2 (verification plus controlled regeneration) is added in M2 on top of S1.
 Generated claims are never written to any graph.
 
 Command line (one question; prints the result):
@@ -54,9 +55,11 @@ from explanation.explainer import SUPPORTED, HierarchyClaim, verify_claim
 from llm.client import LLMError
 from llm.prompt_manager import PROMPT_VERSION, build_messages
 from llm.reasoner import parse_answer
+from query_engine.retrieval_planner import DEFAULT_BUDGET, build_s1_context
 
-#: Retrieval setting per system (keys of evaluation.conditions.CONDITIONS).
-RETRIEVAL = {"B0": "C0", "B1": "U2"}
+#: Retrieval setting per system: keys of evaluation.conditions.CONDITIONS, or
+#: "S1" for the question-aware planner.
+RETRIEVAL = {"B0": "C0", "B1": "U2", "S1": "S1"}
 SYSTEMS = tuple(RETRIEVAL)
 
 INVALID_CLAIM = "invalid_claim"
@@ -125,7 +128,9 @@ class HierarchyAgent:
     come from the evidence or from ``retrieval_client.get_concept``.
     """
 
-    def __init__(self, llm, retrieval_client, label_of=None, evidence_format="v2", child_display_cap=100):
+    def __init__(self, llm, retrieval_client, label_of=None, evidence_format="v2", child_display_cap=100,
+                 request_budget=DEFAULT_BUDGET):
+        self.request_budget = request_budget
         self.llm = llm
         self.retrieval_client = retrieval_client
         self._label_of = label_of
@@ -136,6 +141,9 @@ class HierarchyAgent:
     def retrieve(self, item, system):
         if system not in RETRIEVAL:
             raise ValueError(f"Unknown or not yet implemented system {system!r}; available: {SYSTEMS}")
+        if RETRIEVAL[system] == "S1":
+            return build_s1_context(self.retrieval_client, item, budget=self.request_budget,
+                                    child_display_cap=self.child_display_cap)
         return build_context(self.retrieval_client, item.concept_id, RETRIEVAL[system],
                              child_display_cap=self.child_display_cap)
 
@@ -227,6 +235,7 @@ def _main(argv=None):
     source.add_argument("--synthetic", action="store_true", help="Use the synthetic ontology (no SNOMED CT content)")
     parser.add_argument("--concept", help="Concept ID (default with --synthetic: a deep synthetic concept)")
     parser.add_argument("--target", help="Target concept ID (T3: candidate ancestor; T4: top-level concept)")
+    parser.add_argument("--budget", type=int, default=DEFAULT_BUDGET, help="S1 request budget per question")
     parser.add_argument("--task", required=True, choices=["T1", "T2", "T3", "T4", "T5"])
     parser.add_argument("--system", default="B1", choices=SYSTEMS)
     parser.add_argument("--provider", default="gemini")
@@ -268,7 +277,7 @@ def _main(argv=None):
     if args.task in ("T3", "T4") and not args.target:
         parser.error("--target is required for T3 and T4")
 
-    result = HierarchyAgent(llm, retrieval_client).answer(item, args.system)
+    result = HierarchyAgent(llm, retrieval_client, request_budget=args.budget).answer(item, args.system)
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
     else:

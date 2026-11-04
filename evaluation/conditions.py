@@ -47,6 +47,9 @@ class Context:
     children_total: dict = field(default_factory=dict)   # id -> number retrieved before display cap
     frontier: set = field(default_factory=set)
     failed: set = field(default_factory=set)
+    budget_stopped: set = field(default_factory=set)     # not retrieved because the request budget ran out (S1)
+    request_budget: int = None
+    requests_used: int = None
 
     # ------------------------------------------------------------------
     # derived views
@@ -180,7 +183,15 @@ class Context:
             frontier = ", ".join(self._label(c) for c in sorted(self.frontier, key=lambda c: (rank.get(c, 1e9), c)))
             lines.append(f"Retrieval stopped at the depth limit at: {frontier}. "
                          "Their more general ancestors were not retrieved.")
+        lines += self._budget_lines(rank)
         return "\n".join(lines)
+
+    def _budget_lines(self, rank):
+        if not self.budget_stopped:
+            return []
+        stopped = ", ".join(self._label(c) for c in sorted(self.budget_stopped, key=lambda c: (rank.get(c, 1e9), c)))
+        return [f"Retrieval stopped because the request budget ({self.request_budget} requests) was used up; "
+                f"not retrieved further at: {stopped}."]
 
     def _parents_note(self, concept_id):
         status = self.parents_status.get(concept_id)
@@ -223,6 +234,16 @@ def build_context(snapshot_client, concept_id, condition, child_display_cap=100)
         pages = FULL_CHILD_PAGES if condition == "FULL" else APP_CHILD_PAGES
         builder.expand_children(concept_id, max_pages=pages)
 
+    return fill_context(context, repo, [report] if report else [], concept_id, child_display_cap)
+
+
+def fill_context(context, repo, reports, concept_id, child_display_cap=100):
+    """
+    Copy what a retrieval stored in ``repo`` into ``context``: nodes, edges,
+    per-concept coverage, frontier and failures (one crawl report per
+    expanded start concept). Shared by the fixed conditions and the S1
+    planner, so both produce evidence the same way.
+    """
     context.nodes = dict(repo.concepts)
     context.edges = set(repo.edges)
     for cid in repo.concepts:
@@ -231,8 +252,10 @@ def build_context(snapshot_client, concept_id, condition, child_display_cap=100)
             context.parents_status[cid] = coverage["parents"]["status"]
         if coverage["children"]:
             context.children_status[cid] = coverage["children"]["status"]
-    context.frontier = set(report.frontier) if report else set()
-    context.failed = set(report.failed) if report else set()
+    context.frontier = set().union(*(r.frontier for r in reports)) if reports else set()
+    context.failed = set().union(*(set(r.failed) for r in reports)) if reports else set()
+    # a concept expanded by one crawl is not a frontier just because another crawl stopped there
+    context.frontier -= {c for c in context.frontier if context.parents_status.get(c) == "complete"}
 
     # Display cap for very long child lists: keep the first N by label and
     # mark the list partial so evidence and annotations stay truthful.
