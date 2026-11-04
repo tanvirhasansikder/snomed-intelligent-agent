@@ -109,4 +109,4 @@ def test_prompt_contains_v2_evidence_and_labels(world):
 def test_unknown_system_is_rejected(world):
     ontology, x = world
     with pytest.raises(ValueError):
-        HierarchyAgent(FakeLLM("{}"), ontology).answer(Item("t1", "T1", x, None), "S2")
+        HierarchyAgent(FakeLLM("{}"), ontology).answer(Item("t1", "T1", x, None), "S9")

@@ -29,8 +29,12 @@ Systems:
           children)
 * ``S1``  question-aware retrieval with a request budget
           (query_engine/retrieval_planner.py)
-
-S2 (verification plus controlled regeneration) is added in M2 on top of S1.
+* ``S2``  S1, plus deterministic verification: if the first answer has
+          unsupported claims, bad citations or unlisted IDs in its text, ONE
+          regeneration request gives the exact feedback; then the final
+          filter keeps only evidence-supported claims
+          (explanation/verification.py). The first-pass fields of an S2
+          result are identical to S1's answer, so S1 and S2 pair exactly.
 Generated claims are never written to any graph.
 
 Command line (one question; prints the result):
@@ -52,14 +56,20 @@ from evaluation.conditions import build_context
 from evaluation.tasks import TWO_CONCEPT_TASKS, Item, sufficient
 from explanation.citations import check_citation
 from explanation.explainer import SUPPORTED, HierarchyClaim, verify_claim
+from explanation.verification import finalise, find_problems, has_problems
 from llm.client import LLMError
-from llm.prompt_manager import PROMPT_VERSION, build_messages
+from llm.prompt_manager import (
+    PROMPT_VERSION,
+    REGENERATION_VERSION,
+    build_messages,
+    build_regeneration_messages,
+)
 from llm.reasoner import parse_answer
 from query_engine.retrieval_planner import DEFAULT_BUDGET, build_s1_context
 
 #: Retrieval setting per system: keys of evaluation.conditions.CONDITIONS, or
 #: "S1" for the question-aware planner.
-RETRIEVAL = {"B0": "C0", "B1": "U2", "S1": "S1"}
+RETRIEVAL = {"B0": "C0", "B1": "U2", "S1": "S1", "S2": "S1"}
 SYSTEMS = tuple(RETRIEVAL)
 
 INVALID_CLAIM = "invalid_claim"
@@ -93,6 +103,14 @@ class AgentResult:
     n_supported: int = 0
     n_not_supported: int = 0
     n_bad_citations: int = 0
+    # S2 only. The fields above describe the first pass (identical to S1).
+    problems: dict = None             # what the verifier found in the first pass
+    regenerated: bool = False
+    regeneration: dict = None         # second call: model, tokens, latency, raw text, error, problems left
+    final: dict = None                # answer, insufficient_evidence, claims, removed_claims, ...
+    total_prompt_tokens: int = None
+    total_completion_tokens: int = None
+    total_llm_latency_s: float = None
 
     def to_dict(self):
         data = asdict(self)
@@ -176,13 +194,20 @@ class HierarchyAgent:
         result.edge_index = context.edge_index()
         result.evidence_sufficient = sufficient(item, context)
 
-        messages = build_messages(item, result.evidence_text, lambda cid: self.label(cid, context))
+        label_of = lambda cid: self.label(cid, context)  # noqa: E731
+        messages = build_messages(item, result.evidence_text, label_of)
         try:
             response = self.llm.complete(messages)
         except LLMError as exc:
             result.error = str(exc)
             return result
 
+        self._record_first_pass(result, response, item, context)
+        if system == "S2":
+            self._verify_and_regenerate(result, item, context, messages, label_of)
+        return result
+
+    def _record_first_pass(self, result, response, item, context):
         result.model = response.model
         result.prompt_tokens = response.prompt_tokens
         result.completion_tokens = response.completion_tokens
@@ -197,7 +222,53 @@ class HierarchyAgent:
         result.n_not_supported = len(result.claims) - result.n_supported
         result.n_bad_citations = sum(1 for c in result.claims
                                      if c["citation"] in ("not_entailed", "invalid_edge_id"))
-        return result
+        result.total_prompt_tokens = response.prompt_tokens
+        result.total_completion_tokens = response.completion_tokens
+        result.total_llm_latency_s = response.latency_s
+
+    def _verify_and_regenerate(self, result, item, context, messages, label_of):
+        """S2: at most one regeneration with exact feedback, then the final filter."""
+        first = dict(result.parsed, claims=result.claims)
+        problems = find_problems(item, first, result.claims)
+        result.problems = {k: [_claim_summary(c) if isinstance(c, dict) else c for c in v]
+                           for k, v in problems.items()}
+        chosen_parsed, chosen_claims = first, result.claims
+
+        if has_problems(problems):
+            result.regenerated = True
+            follow_up = build_regeneration_messages(messages, result.raw_text, problems)
+            regen = {"version": REGENERATION_VERSION}
+            try:
+                response = self.llm.complete(follow_up)
+            except LLMError as exc:
+                regen["error"] = str(exc)  # keep the first answer; the final filter still applies
+            else:
+                parsed = parse_answer(response.text, item.task)
+                claims = runtime_verify(parsed["claims"], context)
+                left = find_problems(item, dict(parsed, claims=claims), claims)
+                regen.update({
+                    "model": response.model, "prompt_tokens": response.prompt_tokens,
+                    "completion_tokens": response.completion_tokens, "latency_s": response.latency_s,
+                    "finish_reason": response.finish_reason, "raw_text": response.text,
+                    "parse_error": parsed["parse_error"],
+                    "problems_left": {k: len(v) for k, v in left.items()},
+                })
+                if parsed["parse_error"] is None:
+                    chosen_parsed, chosen_claims = dict(parsed, claims=claims), claims
+                result.total_prompt_tokens = _add(result.total_prompt_tokens, response.prompt_tokens)
+                result.total_completion_tokens = _add(result.total_completion_tokens, response.completion_tokens)
+                result.total_llm_latency_s = _add(result.total_llm_latency_s, response.latency_s)
+            result.regeneration = regen
+
+        result.final = finalise(item, chosen_parsed, chosen_claims, context, label_of)
+
+
+def _add(a, b):
+    return None if a is None and b is None else (a or 0) + (b or 0)
+
+
+def _claim_summary(claim):
+    return {k: claim.get(k) for k in ("subject", "relation", "object", "source", "cites", "runtime_label", "citation")}
 
 
 # ----------------------------------------------------------------------
@@ -227,6 +298,25 @@ def _print_result(result):
         print("  (no claims)")
     print(f"Supported: {result.n_supported}, not supported: {result.n_not_supported}, "
           f"bad citations: {result.n_bad_citations}")
+    if result.system == "S2":
+        print("--- S2 verification ---")
+        found = {k: len(v) for k, v in (result.problems or {}).items()}
+        print(f"Problems in first answer: {found}")
+        if result.regenerated:
+            regen = result.regeneration or {}
+            if regen.get("error"):
+                print(f"Regeneration FAILED ({regen['error']}); first answer kept for the final filter")
+            else:
+                print(f"Regenerated once: tokens {regen.get('prompt_tokens')}/{regen.get('completion_tokens')}, "
+                      f"latency {regen.get('latency_s')}s, problems left {regen.get('problems_left')}")
+        else:
+            print("No problems: no regeneration needed")
+        final = result.final
+        print(f"Final answer: {final['answer']!r}; insufficient_evidence={final['insufficient_evidence']}")
+        print(f"Final claims kept: {len(final['claims'])}, removed: {len(final['removed_claims'])}, "
+              f"citations repaired: {final['citations_repaired']}, text replaced: {final['answer_replaced']}")
+        print(f"Total tokens {result.total_prompt_tokens}/{result.total_completion_tokens}, "
+              f"total LLM latency {result.total_llm_latency_s}s")
 
 
 def _main(argv=None):

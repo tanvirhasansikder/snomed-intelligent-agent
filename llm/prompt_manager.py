@@ -56,6 +56,50 @@ def concept_ref(concept_id, label):
     return f"{label} [{concept_id}]" if label else f"[{concept_id}]"
 
 
+#: Version of the S2 regeneration feedback text (frozen with the prompts at M2).
+REGENERATION_VERSION = "r1"
+
+REGENERATION_INTRO = (
+    "An automatic check of your answer against the retrieved evidence found problems:"
+)
+REGENERATION_INSTRUCTION = (
+    "Revise your answer. Keep only claims that the evidence edges support, citing the exact edge IDs. "
+    "Remove every claim listed above that is not supported; do not replace them with claims from your "
+    "own knowledge. If the remaining evidence is not enough to answer, say so and set "
+    '"insufficient_evidence": true. Reply with one JSON object in the same format.'
+)
+
+
+def _claim_text(claim):
+    obj = f", {claim['object']}" if claim.get("object") else ""
+    return f"{claim['relation']}({claim['subject']}{obj})"
+
+
+def build_regeneration_messages(messages, first_reply, problems):
+    """
+    The single S2 regeneration request: the original conversation, the
+    model's first reply, and exact deterministic feedback (``problems`` from
+    explanation.verification.find_problems).
+    """
+    lines = [REGENERATION_INTRO]
+    reasons = {
+        "insufficient_evidence": "not stated in the retrieved evidence",
+        "contradicted_by_complete_evidence": "contradicted by complete retrieved evidence",
+        "invalid_claim": "not a valid claim",
+    }
+    for claim in problems.get("unsupported", []):
+        lines.append(f"- Unsupported claim {_claim_text(claim)}: {reasons.get(claim['runtime_label'], claim['runtime_label'])}.")
+    for claim in problems.get("bad_citations", []):
+        lines.append(f"- Claim {_claim_text(claim)} cites {claim.get('cites')}, which "
+                     + ("includes an edge ID that does not exist." if claim["citation"] == "invalid_edge_id"
+                        else "does not support it."))
+    for concept_id in problems.get("unlisted_ids", []):
+        lines.append(f"- Your text mentions concept {concept_id}, but no claim states its relationship.")
+    lines.append(REGENERATION_INSTRUCTION)
+    return list(messages) + [{"role": "assistant", "content": first_reply},
+                             {"role": "user", "content": "\n".join(lines)}]
+
+
 def build_messages(item, context_text, label_of):
     """Chat messages for one item. ``label_of`` maps concept ID to preferred label."""
 

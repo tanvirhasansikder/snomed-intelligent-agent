@@ -16,6 +16,7 @@ from collections import Counter
 from evaluation.metrics import set_prf
 from evaluation.sctid import is_valid_sctid
 from explanation.citations import check_citation, citation_counts
+from explanation.verification import filter_answer
 from explanation.explainer import (
     CONTRADICTED,
     FALSE_IN_REFERENCE,
@@ -63,32 +64,8 @@ def _task_score(item, answer, reference, context, abstained=False):
 
 
 def _verified_answer(item, parsed, context):
-    """Deterministically verified answer (LV) and whether it abstains."""
-    x, answer = item.concept_id, parsed["answer"]
-    if item.task == "T1":
-        kept = [p for p in (answer or []) if (x, p) in context.edges]
-        return kept, not kept and not (context.parents_complete(x) and not context.parents_of(x))
-    if item.task == "T2":
-        kept = [c for c in (answer or []) if (c, x) in context.edges]
-        leaf_confirmed = context.children_complete(x) and not context.children_of(x)
-        return kept, not kept and not leaf_confirmed
-    if item.task == "T3":
-        if answer == "yes" and item.target_id in context.ancestors_of(x):
-            return "yes", False
-        if answer == "no" and context.closure_complete(x) and item.target_id not in context.ancestors_of(x):
-            return "no", False
-        return "unknown", True
-    if item.task == "T4":
-        chain = list(answer or [])
-        ok = (len(chain) >= 2 and chain[0] == x and chain[-1] == item.target_id
-              and all((a, b) in context.edges for a, b in zip(chain, chain[1:])))
-        return (chain, False) if ok else ([], True)
-    if item.task == "T6":
-        z = item.target_id
-        common = context.ancestors_of(x) & context.ancestors_of(z)
-        kept = [a for a in (answer or []) if a in common]
-        return kept, not kept
-    return answer, False
+    """Deterministically verified answer (LV) and whether it abstains (same code as S2)."""
+    return filter_answer(item, parsed["answer"], context)
 
 
 def _label_claims(claims, evidence, reference):
