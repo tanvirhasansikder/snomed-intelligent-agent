@@ -11,7 +11,6 @@ context's edges and coverage records, never by an LLM.
 import random
 from dataclasses import asdict, dataclass, field
 
-from evaluation.collect import ROOT_ID
 from explanation.citations import cite_for
 
 TASKS = ("T1", "T2", "T3", "T4", "T5", "T6")
@@ -73,7 +72,7 @@ def generate_items(gold, tasks=TASKS, seed=0):
 
         if "T3" in tasks:
             distances = gold.distance_to_ancestors(concept_id)
-            far = sorted(a for a, d in distances.items() if d >= 2 and a != ROOT_ID)
+            far = sorted(a for a, d in distances.items() if d >= 2 and not gold.is_root(a))  # top concept excluded
             if far:
                 target = rng.choice(far)
                 items.append(Item(f"T3+:{concept_id}", "T3", concept_id, True, target_id=target, polarity="pos",

@@ -57,8 +57,9 @@ H2, H3 and H4 are the primary hypotheses; H1 is secondary. Holm correction is ap
 * **Source:** BioPortal `SNOMEDCT` (SNOMED CT US Edition). The release is recorded from `latest_submission`. Every API response is stored with a timestamp (`evaluation/bioportal_cache.py`), and all experiments replay this snapshot offline. Retrieval is therefore deterministic, and the reference is fixed.
 * **Sampling** (`evaluation/collect.py`):
   * six top-level hierarchies: Clinical finding 404684003, Procedure 71388002, Body structure 123037004, Substance 105590001, Pharmaceutical/biologic product 373873005 and Organism 410607006;
-  * each is validated as a child of the root 138875005;
-  * seeded random descent through direct children to a target depth drawn uniformly from 2–8, stopping at leaves.
+  * each is validated as a child of the root 138875005 or, as BioPortal serves SNOMEDCT, as a top concept: the concept exists and has no parents (Amendment 2). The check used is recorded in the data set;
+  * seeded random descent through direct children to a target depth drawn uniformly from 2–8 below the hierarchy's top concept, stopping at leaves.
+* **Depth** of a concept = the number of IS_A steps to the top concept of its hierarchy (shortest and longest path). In BioPortal's SNOMEDCT this is one less than the depth below the SNOMED CT root.
 * **Size:**
   * **main study:** 20 concepts per hierarchy, 120 in total, seed 2026110202;
   * **pilot:** 2 per hierarchy, 12 in total, seed 2026110201, excluded from the main set.
@@ -79,7 +80,7 @@ H2, H3 and H4 are the primary hypotheses; H1 is secondary. Holm correction is ap
 | --- | --- | --- | --- |
 | T1 | Direct parents of X | set of IDs | set F1 (also P, R) |
 | T2 | Direct children of X (only where the gold child list is complete and has ≤ 100 children) | set, possibly empty | set F1; "no children" claims scored as absence claims |
-| T3 | Is X a kind of Y? Positive: Y is an ancestor ≥ 2 steps away (root excluded). Negative: Y is a sibling of X. | yes / no | accuracy |
+| T3 | Is X a kind of Y? Positive: Y is an ancestor ≥ 2 steps away (the hierarchy's top concept excluded, as trivial). Negative: Y is a sibling of X. | yes / no | accuracy |
 | T4 | IS_A path from X to its top-level concept | every valid upward path | exact validity (valid chain reaching the target); edge precision; **edge F1** against the best-matching gold path |
 | T6 | Nearest common ancestor of X and Z, where Z is another sampled concept of the same hierarchy (seeded pairing) | set of lowest common ancestors (LCA set; can have more than one in a polyhierarchy) | hit (answer ∈ LCA set); set F1 when several are given |
 | T5 | Explain where X sits in the hierarchy | structured claims plus text | claim labels (Section 7); completeness = recall of X's gold parents, and whether the child status is stated correctly |
@@ -263,3 +264,9 @@ The pilot checks parsing, quota, timing and bugs only. Analysis scripts are fixe
   1. The `answer_in_evidence` label was added alongside `sufficient` (Section 5), and RQ3 is reported under both.
   2. B0/B1 expand both concepts of a T6 question (Section 11).
   3. Lexical cues were added as a threat to validity (Section 11).
+
+* **Amendment 2 (2026-11-05, at the first pilot collection, before any concept was sampled or stored).** Reason: in BioPortal's SNOMEDCT (US Edition via UMLS), the root 138875005 exists but lists no children, and the six top-level hierarchy concepts have no parents (checked live). Collection stopped at the hierarchy check, and nothing was saved.
+  1. A hierarchy is accepted if it is a child of the root or a top concept with no parents. The check used is recorded per hierarchy (`hierarchy_validation`).
+  2. Depth is measured to the hierarchy's top concept (a concept whose retrieved parent list is empty) instead of to 138875005 (Section 4).
+  3. T3 positive targets exclude that top concept instead of the root (Section 5).
+  The synthetic test ontology keeps a root and is unaffected.

@@ -77,11 +77,32 @@ def resolve(config, key):
 # ============================================================
 
 def validate_hierarchies(client, hierarchy_ids, root_id=ROOT_ID):
+    """
+    Check the configured top-level hierarchies and say how each was confirmed:
+
+    * "child_of_root": a direct child of the SNOMED CT root (the full
+      SNOMED structure; also the synthetic test ontology)
+    * "top_concept":   the concept exists and has NO parents. BioPortal's
+      SNOMEDCT (US Edition via UMLS) exposes the top-level hierarchies
+      themselves as its top concepts; the root 138875005 exists there but
+      lists no children (checked live on 2026-11-05).
+
+    Anything else is rejected. Returns {hierarchy_id: how}.
+    """
     top = {c["concept_id"] for c in client.fetch_children(root_id)["children"]}
-    missing = [h for h in hierarchy_ids if h not in top]
-    if missing:
-        raise ValueError(f"Not direct children of the root {root_id}: {missing}")
-    return sorted(top)
+    how, problems = {}, []
+    for h in hierarchy_ids:
+        if h in top:
+            how[h] = "child_of_root"
+        elif client.get_concept(h) is None:
+            problems.append(f"{h} (not found)")
+        elif client.get_parents(h):
+            problems.append(f"{h} (neither a child of the root {root_id} nor a top concept)")
+        else:
+            how[h] = "top_concept"
+    if problems:
+        raise ValueError(f"Invalid top-level hierarchies: {problems}")
+    return how
 
 
 def sample_concepts(client, hierarchies, per_hierarchy, seed, min_depth=2, max_depth=8,
@@ -195,7 +216,7 @@ def collect(config, live_client, store):
     hierarchies = data.get("hierarchies") or DEFAULT_HIERARCHIES
 
     version = client.get_ontology_version()
-    validate_hierarchies(client, list(hierarchies))
+    hierarchy_validation = validate_hierarchies(client, list(hierarchies))
 
     exclude = set()
     for other in data.get("exclude_samples_from", []):
@@ -224,6 +245,7 @@ def collect(config, live_client, store):
         "synthetic": bool(config.get("synthetic", False)),
         "source": "synthetic" if config.get("synthetic") else "BioPortal REST API (SNOMEDCT)",
         "release": version,
+        "hierarchy_validation": hierarchy_validation,
         "collected_at": _utc_now(),
         "retrieval_window": {"first": first, "last": last},
         "code_revision": git_revision(),

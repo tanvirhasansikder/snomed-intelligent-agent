@@ -12,7 +12,6 @@ Everything here is computed from stored API responses only:
 from collections import deque
 from functools import lru_cache
 
-from evaluation.collect import ROOT_ID
 from explanation.explainer import ReferenceHierarchy
 
 
@@ -78,13 +77,22 @@ class GoldIndex:
         dist.pop(concept_id)
         return dist
 
+    def is_root(self, concept_id):
+        """
+        True if the concept's parents were retrieved and there are none: the
+        top of its hierarchy. That is the SNOMED CT root in the full structure,
+        but each top-level hierarchy concept in BioPortal's SNOMEDCT.
+        """
+        return self.parents.get(concept_id) == []
+
     def depth(self, concept_id):
-        """(shortest, longest) IS_A path length to the root; None if unreachable."""
-        shortest = self.distance_to_ancestors(concept_id).get(ROOT_ID)
+        """(shortest, longest) IS_A path length to a top concept (``is_root``); None if unreachable."""
+        tops = [d for a, d in self.distance_to_ancestors(concept_id).items() if self.is_root(a)]
+        shortest = min(tops) if tops else None
 
         @lru_cache(maxsize=None)
         def longest(node):
-            if node == ROOT_ID:
+            if self.is_root(node):
                 return 0
             options = [longest(p) for p in self.parents.get(node, [])]
             options = [o for o in options if o is not None]
