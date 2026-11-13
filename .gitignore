@@ -237,3 +237,5 @@ paper/*.out
 paper/main.pdf
 
 snomedAgent-audit-2026-10-17/
+
+data/archive/
