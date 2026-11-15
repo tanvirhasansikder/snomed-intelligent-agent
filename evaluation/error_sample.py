@@ -1,4 +1,4 @@
-﻿"""Draw the 30-item error-analysis sample (Protocol Amendment 6).
+"""Draw the 30-item error-analysis sample (Protocol Amendment 6).
 
 Reads results/main/system_responses.jsonl and never modifies it. Without
 --write it only prints the stratum sizes. With --write it creates

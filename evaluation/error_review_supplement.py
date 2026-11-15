@@ -1,4 +1,4 @@
-﻿"""Print the 9 S1 false-claim items that do not match the negation-echo pattern."""
+"""Print the 9 S1 false-claim items that do not match the negation-echo pattern."""
 import json
 
 from evaluation.error_review import show

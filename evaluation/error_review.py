@@ -1,4 +1,4 @@
-﻿"""Read-only viewer for the Amendment 6 error-analysis sample.
+"""Read-only viewer for the Amendment 6 error-analysis sample.
 
     python -m evaluation.error_review --list
     python -m evaluation.error_review --config configs/main.json --index 1
