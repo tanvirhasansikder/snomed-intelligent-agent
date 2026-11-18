@@ -40,4 +40,6 @@ def build_client(spec):
         seed=spec.get("seed"),
         extra_body=spec.get("extra_body"),
         max_retries=spec.get("max_retries", 4),
+        retry_min_delay=spec.get("retry_min_delay"),
+        retry_max_delay=spec.get("retry_max_delay", 120),
     )

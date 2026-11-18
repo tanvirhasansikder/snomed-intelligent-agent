@@ -131,6 +131,8 @@ def _main(argv=None):
     parser.add_argument("--rpm", type=float, default=10, help="Requests per minute (stay under free-tier limits)")
     parser.add_argument("--max-retries", type=int, default=1,
                         help="Retries per request on 429/5xx (low by default to protect free-tier quota)")
+    parser.add_argument("--retry-min-delay", type=float, default=None,
+                        help="First wait in seconds after an overload (doubles each retry, max 120 s)")
     args = parser.parse_args(argv)
 
     try:
@@ -141,7 +143,7 @@ def _main(argv=None):
 
     spec = {"name": f"smoke-{args.provider}", "provider": args.provider, "model": args.model or "unused",
             "temperature": 0.0, "max_tokens": args.max_tokens, "json_mode": not args.no_json_mode,
-            "rpm": args.rpm, "max_retries": args.max_retries}
+            "rpm": args.rpm, "max_retries": args.max_retries, "retry_min_delay": args.retry_min_delay}
     if args.reasoning_effort:
         spec["extra_body"] = {"reasoning_effort": args.reasoning_effort}
     client = build_client(spec)

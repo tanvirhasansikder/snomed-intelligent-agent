@@ -86,10 +86,12 @@
       "max_tokens": 8192,
       "json_mode": true,
       "rpm": 12,
-      "max_retries": 1,
+      "max_retries": 3,
       "extra_body": {
         "reasoning_effort": "low"
-      }
+      },
+      "retry_min_delay": 10,
+      "retry_max_delay": 120
     },
     {
       "name": "gemma-4-31b",
@@ -99,7 +101,9 @@
       "max_tokens": 8192,
       "json_mode": true,
       "rpm": 10,
-      "max_retries": 4
+      "max_retries": 6,
+      "retry_min_delay": 15,
+      "retry_max_delay": 120
     }
   ]
 }

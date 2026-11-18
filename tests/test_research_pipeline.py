@@ -638,3 +638,18 @@ def test_annotation_export_is_blind_and_kappa_runs(world, tmp_path):
             writer.writerows(rows)
     result = annotation.agreement(out / "annotator_A.csv", out / "annotator_B.csv")
     assert set(result) == {"extra_claim", "contradicts_claims"}
+
+
+def test_retry_min_delay_waits_longer_than_retry_after():
+    overloaded = lambda: FakeResponse(503, text="busy", headers={"Retry-After": "2"})
+    waits = []
+    session = PostSession([overloaded(), overloaded(), overloaded(), OK])
+    client = OpenAICompatibleClient("p", "https://example.invalid/v1", "m", session=session, sleep=waits.append,
+                                    max_retries=4, retry_min_delay=15, retry_max_delay=40)
+    assert client.complete([{"role": "user", "content": "hi"}]).text == "{}"
+    assert waits == [15, 30, 40]                         # doubling from 15 s, capped at 40 s
+    default_waits = []
+    session = PostSession([overloaded(), OK])
+    OpenAICompatibleClient("p", "https://example.invalid/v1", "m", session=session, sleep=default_waits.append,
+                           max_retries=2).complete([{"role": "user", "content": "hi"}])
+    assert default_waits == [2.0]                        # unchanged default: the server's Retry-After

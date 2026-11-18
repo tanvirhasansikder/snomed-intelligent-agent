@@ -77,7 +77,7 @@ class OpenAICompatibleClient:
 
     def __init__(self, name, base_url, model, api_key_env=None, temperature=0.0, max_tokens=800,
                  timeout=120, rpm=None, json_mode=False, seed=None, max_retries=4, session=None, sleep=None,
-                 extra_body=None):
+                 extra_body=None, retry_min_delay=None, retry_max_delay=120):
         if not base_url or not model:
             raise LLMConfigurationError("base_url and model are required")
         self.name = name
@@ -97,6 +97,11 @@ class OpenAICompatibleClient:
         if reserved:
             raise LLMConfigurationError(f"extra_body may not override {sorted(reserved)}")
         self.max_retries = max_retries
+        # Overload (HTTP 503) on free tiers often lasts minutes, while the server's Retry-After says 2 s.
+        # retry_min_delay sets the first wait (doubling each retry, up to retry_max_delay). None keeps the
+        # original behaviour (Retry-After, else 2, 4, 8 ... s), so Study 1 settings are unchanged.
+        self.retry_min_delay = retry_min_delay
+        self.retry_max_delay = retry_max_delay
         self.session = session or requests.Session()
         self.sleep = sleep or time.sleep
         self._last_call = 0.0
@@ -226,8 +231,12 @@ class OpenAICompatibleClient:
                     delay = float(retry_after) if retry_after else min(60, 2 ** attempt * 2)
                 except ValueError:
                     delay = min(60, 2 ** attempt * 2)
-                logger.warning("%s returned %s; retrying in %.0fs", self.name, response.status_code, delay)
-                self.sleep(min(delay, 120))
+                if self.retry_min_delay is not None:
+                    delay = max(delay, self.retry_min_delay * 2 ** attempt)
+                delay = min(delay, self.retry_max_delay)
+                logger.warning("%s returned %s; retrying in %.0fs (attempt %d of %d)", self.name,
+                               response.status_code, delay, attempt + 1, self.max_retries)
+                self.sleep(delay)
                 continue
             raise LLMError(f"{self.name}: {problem}")
 
