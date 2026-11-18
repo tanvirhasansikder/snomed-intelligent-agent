@@ -225,6 +225,7 @@ data/bioportal_cache/
 data/datasets/
 data/synthetic/
 data/snomed_db/
+data/local_cache/
 *.db
 results/
 

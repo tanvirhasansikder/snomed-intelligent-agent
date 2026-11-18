@@ -116,7 +116,7 @@ class LocalTerminologyClient:
                 raise
             return []
 
-    def get_ancestors(self, concept_id, raise_errors=False):
+    def get_ancestors(self, concept_id, raise_errors=False, **_paging):
         self._count()
         if not self._known(concept_id, raise_errors):
             return []

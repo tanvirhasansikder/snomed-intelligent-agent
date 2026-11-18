@@ -1,0 +1,38 @@
+{
+  "name": "v3_main",
+  "_note_source": "Study 2 (protocol v3): the supervisor's snomed.db, International view (release 2026-02-01), read through crawler/local_client.py. Run: python -m evaluation.collect --config <this file> --local data/snomed_db/snomed.db",
+  "_note_experiment": "The experiment and models sections are added with the retrieval conditions (next tasks), before protocol v3 is frozen.",
+  "cache_path": "data/local_cache/v3_calls.jsonl",
+  "dataset_path": "data/datasets/v3_main.json",
+  "results_dir": "results/v3_main",
+  "max_child_pages": 20,
+  "child_pagesize": 100,
+  "data": {
+    "sampler": "stratified",
+    "view": "international",
+    "per_stratum": 4,
+    "seed": 2026111901,
+    "depth_bins": [
+      [
+        "shallow",
+        1,
+        3
+      ],
+      [
+        "middle",
+        4,
+        6
+      ],
+      [
+        "deep",
+        7,
+        99
+      ]
+    ],
+    "exclude_samples_from": [
+      "data/datasets/pilot.json",
+      "data/datasets/main.json",
+      "data/datasets/v3_pilot.json"
+    ]
+  }
+}

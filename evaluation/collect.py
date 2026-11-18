@@ -162,6 +162,79 @@ def sample_concepts(client, hierarchies, per_hierarchy, seed, min_depth=2, max_d
     return samples
 
 
+DEFAULT_DEPTH_BINS = (("shallow", 1, 3), ("middle", 4, 6), ("deep", 7, 99))
+
+
+def sample_concepts_stratified(graph, hierarchies, per_stratum, seed, depth_bins=DEFAULT_DEPTH_BINS,
+                               exclude=(), max_per_hierarchy=None):
+    """
+    Seeded stratified sampler over a complete local graph (protocol v3, Study 2).
+
+    For each hierarchy, every descendant of its top-level concept is placed in
+    a stratum by (depth bin, leaf or not); depth is the shortest number of
+    IS-A steps below the top-level concept. ``per_stratum`` concepts are drawn
+    from each stratum (all of them if it has fewer). ``max_per_hierarchy``
+    then optionally keeps a seeded subset (used for the small pilot).
+
+    Each sample also gets a seeded shortest path from the top-level concept,
+    so ``descent_path[-2]`` is a direct parent (the T2 subject).
+    """
+    excluded = set(exclude)
+    depths = graph.depths()
+    chosen, samples = set(), []
+    for hierarchy_id, hierarchy_name in sorted(hierarchies.items()):
+        rng = random.Random(f"{seed}:{hierarchy_id}")
+        members, stack = set(), list(graph.children_of(hierarchy_id))
+        while stack:
+            node = stack.pop()
+            if node not in members:
+                members.add(node)
+                stack.extend(graph.children_of(node))
+        top_depth = depths[hierarchy_id][0]
+        strata = {}
+        for cid in sorted(members):
+            if cid in excluded or cid in chosen or cid not in depths:
+                continue
+            depth = depths[cid][0] - top_depth
+            bin_name = next((name for name, low, high in depth_bins if low <= depth <= high), None)
+            if bin_name is None:
+                continue
+            leaf = not graph.children_of(cid)
+            strata.setdefault((bin_name, leaf), []).append((cid, depth, leaf))
+        picked = []
+        for key in sorted(strata, key=lambda k: ([b[0] for b in depth_bins].index(k[0]), k[1])):
+            pool = strata[key]
+            if len(pool) < per_stratum:
+                logger.warning("Hierarchy %s, stratum %s: only %d concepts", hierarchy_id, key, len(pool))
+            picked.extend(rng.sample(pool, min(per_stratum, len(pool))))
+        if max_per_hierarchy is not None and len(picked) > max_per_hierarchy:
+            picked = rng.sample(picked, max_per_hierarchy)
+        for cid, depth, leaf in sorted(picked):
+            chosen.add(cid)
+            path = [cid]
+            while path[-1] != hierarchy_id:
+                ups = [p for p in graph.parents_of(path[-1]) if p == hierarchy_id or p in members]
+                best = min(depths[p][0] for p in ups)
+                path.append(rng.choice(sorted(p for p in ups if depths[p][0] == best)))
+            path.reverse()
+            samples.append({
+                "concept_id": cid,
+                "hierarchy_id": hierarchy_id,
+                "hierarchy_name": hierarchy_name,
+                "sampler": "stratified-v3",
+                "depth_bin": next(name for name, low, high in depth_bins if low <= depth <= high),
+                "depth_below_top": depth,
+                "is_leaf": leaf,
+                "descent_path": path,
+                # fields kept for compatibility with Study 1's records
+                "target_depth": depth,
+                "descent_depth": len(path) - 1,
+                "stopped_at_leaf": leaf,
+                "child_list_truncated_on_path": False,
+            })
+    return samples
+
+
 # ============================================================
 # Closure collection
 # ============================================================
@@ -225,10 +298,18 @@ def collect(config, live_client, store):
         if other_path.exists():
             exclude.update(s["concept_id"] for s in json.loads(other_path.read_text(encoding="utf-8"))["samples"])
 
-    samples = sample_concepts(
-        client, hierarchies, data["per_hierarchy"], data["seed"],
-        data.get("min_depth", 2), data.get("max_depth", 8), exclude=exclude,
-    )
+    if data.get("sampler") == "stratified":
+        graph = getattr(live_client, "graph", None)
+        if graph is None:
+            raise ValueError("the stratified sampler needs the local client (run with --local)")
+        bins = tuple(tuple(b) for b in data["depth_bins"]) if data.get("depth_bins") else DEFAULT_DEPTH_BINS
+        samples = sample_concepts_stratified(graph, hierarchies, data["per_stratum"], data["seed"], bins,
+                                             exclude=exclude, max_per_hierarchy=data.get("max_per_hierarchy"))
+    else:
+        samples = sample_concepts(
+            client, hierarchies, data["per_hierarchy"], data["seed"],
+            data.get("min_depth", 2), data.get("max_depth", 8), exclude=exclude,
+        )
 
     failures, summaries = {}, []
     for sample in samples:
@@ -244,7 +325,9 @@ def collect(config, live_client, store):
         "schema_version": "2.0",
         "name": config["name"],
         "synthetic": bool(config.get("synthetic", False)),
-        "source": "synthetic" if config.get("synthetic") else "BioPortal REST API (SNOMEDCT)",
+        "source": ("synthetic" if config.get("synthetic") else
+                   f"local snomed.db ({live_client.graph.view} view)" if hasattr(live_client, "graph") else
+                   "BioPortal REST API (SNOMEDCT)"),
         "release": version,
         "hierarchy_validation": hierarchy_validation,
         "collected_at": _utc_now(),
@@ -273,13 +356,18 @@ def _main(argv=None):
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--live", action="store_true", help="Call BioPortal (bounded by the configuration)")
     group.add_argument("--synthetic", action="store_true", help="Use the built-in synthetic ontology (no network)")
+    group.add_argument("--local", metavar="DB", help="Use the local SNOMED CT database (no network), e.g. "
+                                                     "data/snomed_db/snomed.db")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     config = load_config(args.config)
     store = CallStore(resolve(config, "cache_path"))
 
-    if args.synthetic:
+    if args.local:
+        from crawler.local_client import LocalTerminologyClient
+        live = LocalTerminologyClient.from_db(args.local, view=config["data"].get("view", "international"))
+    elif args.synthetic:
         from evaluation.synthetic import SyntheticOntology
         config["synthetic"] = True
         live = SyntheticOntology(seed=config.get("synthetic_seed", 0))
@@ -296,6 +384,12 @@ def _main(argv=None):
     print(f"Saved {len(dataset['samples'])} concepts ({len(dataset['failures'])} failures) to {path}")
     print(f"Release: {dataset['release']}; new API requests: {dataset['api_requests']}; "
           f"cache records: {dataset['cache_records']}")
+    if any(s.get("sampler") == "stratified-v3" for s in dataset["samples"]):
+        from collections import Counter
+        counts = Counter((s["hierarchy_name"], s["depth_bin"], "leaf" if s["is_leaf"] else "non-leaf")
+                         for s in dataset["samples"])
+        for key, n in sorted(counts.items()):
+            print(f"   {key[0]:<36} {key[1]:<8} {key[2]:<9} {n}")
     inconsistent = [s["concept_id"] for s in dataset["samples"] if not s["ancestors_consistent"]]
     if inconsistent:
         print(f"WARNING: /ancestors differs from the parent-link closure for {len(inconsistent)} concept(s): "
