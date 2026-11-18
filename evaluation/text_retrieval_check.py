@@ -1,7 +1,8 @@
 """
-Check the L-RAG baseline on real data before any model sees it (read-only, no API calls).
+Check the L-RAG or D-RAG baseline on real data before any model sees it (read-only, no API calls).
 
     python -m evaluation.text_retrieval_check --db data\\snomed_db\\snomed.db --dataset data\\datasets\\v3_pilot.json
+    python -m evaluation.text_retrieval_check --system D-RAG --db data\\snomed_db\\snomed.db --dataset data\\datasets\\v3_pilot.json
 
 For every item of the data set it runs the lexical (BM25) card retrieval and
 the question-aware graph retrieval (G-QA = S1, with ``--budget`` requests) and reports, per task: whether
@@ -33,15 +34,20 @@ EXAMPLES = 6
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Check L-RAG on real data (no API calls)")
+    parser = argparse.ArgumentParser(description="Check L-RAG or D-RAG on real data (no API calls)")
     parser.add_argument("--db", default="data/snomed_db/snomed.db")
     parser.add_argument("--dataset", default="data/datasets/v3_pilot.json")
     parser.add_argument("--cache", default="data/local_cache/v3_calls.jsonl")
     parser.add_argument("--k", type=int, default=DEFAULT_K)
     parser.add_argument("--budget", type=int, default=1000,
                         help="G-QA request budget per question (Study 1 used 60 for BioPortal)")
-    parser.add_argument("--out", default="data/snomed_db/text_retrieval_check.txt")
+    parser.add_argument("--system", choices=("L-RAG", "D-RAG"), default="L-RAG")
+    parser.add_argument("--dense-dir", default="data/snomed_db/dense",
+                        help="D-RAG: folder with the exported matrix and the query vectors")
+    parser.add_argument("--out", default=None, help="default: data/snomed_db/text_retrieval_check[_drag].txt")
     args = parser.parse_args(argv)
+    if args.out is None:
+        args.out = "data/snomed_db/text_retrieval_check" + ("_drag" if args.system == "D-RAG" else "") + ".txt"
 
     started = time.time()
     client = LocalTerminologyClient.from_db(args.db)
@@ -49,6 +55,16 @@ def main(argv=None):
     store = CardStore(args.db)
     dataset = json.loads(Path(args.dataset).read_text(encoding="utf-8"))
     items = generate_items(GoldIndex(CallStore(args.cache), dataset), seed=0)
+    if args.system == "D-RAG":
+        from evaluation.dense_retrieval import DenseIndex, dense_retrieve, load_query_vectors
+        index = DenseIndex(args.dense_dir)
+        vectors = load_query_vectors(Path(args.dense_dir) / f"query_vectors_{Path(args.dataset).stem}.npz")
+
+        def retrieve(item):
+            return dense_retrieve(item, index, vectors, client.label, k=args.k)
+    else:
+        def retrieve(item):
+            return lexical_retrieve(item, store, client.label, k=args.k, keep=keep)
     logging.getLogger("crawler").setLevel(logging.ERROR)    # budget refusals are counted below, not logged
     print(f"Loaded in {time.time() - started:.0f} s: {len(items)} items from {len(dataset['samples'])} concepts")
 
@@ -56,10 +72,10 @@ def main(argv=None):
     search_ms, requests, stopped = [], [], 0
     for item in items:
         t0 = time.perf_counter()
-        ids, queries = lexical_retrieve(item, store, client.label, k=args.k, keep=keep)
+        ids, queries = retrieve(item)
         query = " | ".join(queries)
         search_ms.append((time.perf_counter() - t0) * 1000)
-        text_ctx = card_context(item, ids, store, "L-RAG")
+        text_ctx = card_context(item, ids, store, args.system)
         graph_ctx = build_s1_context(client, item, budget=args.budget)
         requests.append(graph_ctx.requests_used or 0)
         stopped += bool(graph_ctx.budget_stopped)
@@ -78,8 +94,8 @@ def main(argv=None):
         if len(examples) < EXAMPLES and item.task not in {e[0] for e in examples}:
             examples.append((item.task, item.item_id, query, text_ev, graph_ev))
 
-    lines = [f"L-RAG check on {args.dataset}: {len(items)} items, k = {args.k}",
-             f"BM25 search: median {statistics.median(search_ms):.0f} ms, max {max(search_ms):.0f} ms",
+    lines = [f"{args.system} check on {args.dataset}: {len(items)} items, k = {args.k}",
+             f"{'BM25' if args.system == 'L-RAG' else 'Dense'} search: median {statistics.median(search_ms):.0f} ms, max {max(search_ms):.0f} ms",
              f"G-QA requests per question (budget {args.budget}): median {statistics.median(requests):.0f}, "
              f"95th percentile {sorted(requests)[int(0.95 * (len(requests) - 1))]}, max {max(requests)}; "
              f"items stopped by the budget: {stopped}", "",
@@ -104,7 +120,7 @@ def main(argv=None):
 
     detail = [report, ""]
     for task, item_id, query, text_ev, graph_ev in examples:
-        detail += [f"===== {task} {item_id}", f"QUERY: {query}", "--- L-RAG evidence ---", text_ev,
+        detail += [f"===== {task} {item_id}", f"QUERY: {query}", f"--- {args.system} evidence ---", text_ev,
                    "--- G-QA evidence ---", graph_ev, ""]
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
