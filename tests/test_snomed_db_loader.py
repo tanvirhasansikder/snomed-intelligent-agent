@@ -92,7 +92,8 @@ def test_manifest_and_cli(tmp_path, db, capsys):
     out = tmp_path / "manifest.json"
     assert main(["--db", str(db), "--out", str(out)]) == 0
     manifest = json.loads(out.read_text(encoding="utf-8"))
-    assert len(manifest["sha256"]) == 64 and set(manifest["views"]) == {"international", "full"}
+    assert len(manifest["sha256"]) == 64
+    assert set(manifest["views"]) == {"international", "international-filtered", "full"}
     assert manifest["views"]["international"]["root_is_unique"] is True
     assert "2026-02-01" in manifest["release"]
     assert "unique root: True" in capsys.readouterr().out
@@ -104,3 +105,39 @@ def test_errors(tmp_path, db):
         load_graph(db, "everything")
     with pytest.raises(FileNotFoundError):
         load_graph(tmp_path / "missing.db")
+
+
+def _bridged_db(tmp_path):
+    """ROOT -> TOP_A -> A3 -> (UK X) -> A1, plus TOP_A -> (UK Y) -> A1, and an International leaf under an orphan."""
+    path = tmp_path / "bridged.db"
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE concepts (concept_id TEXT PRIMARY KEY, term TEXT)")
+    con.execute("CREATE TABLE edges (parent_id TEXT, child_id TEXT, PRIMARY KEY (parent_id, child_id))")
+    uk_x, uk_y, orphan_int = "1240631000000102", "1373761000000103", "102449007"
+    terms = {ROOT_ID: "root", TOP_A: "top", A3: "a3", A1: "a1", A2: "a2", uk_x: "uk x", uk_y: "uk y",
+             UK_ORPHAN_PARENT: "uk orphan", orphan_int: "orphan international"}
+    con.executemany("INSERT INTO concepts VALUES (?, ?)", terms.items())
+    con.executemany("INSERT INTO edges VALUES (?, ?)", [
+        (ROOT_ID, TOP_A), (TOP_A, A3), (A3, uk_x), (uk_x, A1), (TOP_A, uk_y), (uk_y, A1), (A1, A2),
+        (UK_ORPHAN_PARENT, orphan_int)])
+    con.commit()
+    con.close()
+    return path, orphan_int
+
+
+def test_projection_bridges_over_extension_concepts(tmp_path):
+    path, orphan_int = _bridged_db(tmp_path)
+    filtered = load_graph(path, "international-filtered")
+    assert filtered.parents_of(A1) == []                      # dropping the UK concepts orphans A1
+    projected = load_graph(path, "international")
+    assert projected.parents_of(A1) == [A3]                   # TOP_A is dropped: it is an ancestor of A3
+    assert projected.ancestors(A2) == {A1, A3, TOP_A, ROOT_ID}
+    assert projected.projection["children_bridged_over_extensions"] == 1
+    assert projected.projection["redundant_parents_removed"] == 1
+    report = check_graph(projected)
+    assert report["roots"] == [ROOT_ID]
+    assert report["not_reachable_from_root"] == 1 and report["not_reachable_examples"] == [orphan_int]
+
+
+def test_full_view_has_no_projection_stats(db):
+    assert load_graph(db, "full").projection == {}

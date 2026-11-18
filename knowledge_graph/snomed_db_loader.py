@@ -12,8 +12,19 @@ effectiveTime or relationship type.
 Two views of the hierarchy:
 
 * ``international`` (primary): only concepts with an International (core)
-  identifier, i.e. partition ``00``, and the edges between them;
+  identifier, i.e. partition ``00``. The file's hierarchy was classified with
+  extension concepts included, so an extension concept can sit between two
+  International ones (P -> extension X -> C). Simply dropping X would orphan
+  C, so the view *projects* the hierarchy instead: each International concept's
+  parents are its nearest International ancestors reached through extension
+  concepts, keeping only the most specific ones (transitive reduction);
+* ``international-filtered`` (diagnostic only): International concepts and only
+  the edges directly between them, which shows how many links ran through
+  extensions;
 * ``full`` (sensitivity check): every concept and edge in the file.
+
+The file holds 17 top-level hierarchies: "Special concept" (370115009) and
+"SNOMED CT Model Component" (900000000000441003) are not in it.
 
 Run it once to check the file and write the data manifest (no SNOMED CT
 content, safe to commit):
@@ -34,7 +45,7 @@ from collections import Counter, deque
 from pathlib import Path
 
 ROOT_ID = "138875005"
-VIEWS = ("international", "full")
+VIEWS = ("international", "international-filtered", "full")
 DEFAULT_MANIFEST = Path("data") / "manifests" / "snomed_db_manifest.json"
 RELEASE_NOTE = ("International Edition build (supervisor, 2026-11-18); International content matches the "
                 "2026-02-01 release: newest core concepts carry effectiveTime 2026-02-01 and concepts first "
@@ -59,9 +70,10 @@ def is_international(concept_id):
 class SnomedGraph:
     """An IS-A hierarchy held in memory: parents, children and names by concept ID."""
 
-    def __init__(self, names, edges, view, source=None):
+    def __init__(self, names, edges, view, source=None, projection=None):
         self.view = view
         self.source = source
+        self.projection = projection or {}
         self.names = dict(names)
         self.parents = {}
         self.children = {}
@@ -177,12 +189,87 @@ def load_graph(db_path, view="international"):
         raise FileNotFoundError(f"Database not found: {path}")
     con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
     try:
-        keep = (lambda c: True) if view == "full" else is_international
-        names = {cid: term for cid, term in con.execute("SELECT concept_id, term FROM concepts") if keep(cid)}
-        edges = [(p, c) for p, c in con.execute("SELECT parent_id, child_id FROM edges") if keep(p) and keep(c)]
+        all_names = dict(con.execute("SELECT concept_id, term FROM concepts"))
+        all_edges = list(con.execute("SELECT parent_id, child_id FROM edges"))
     finally:
         con.close()
-    return SnomedGraph(names, edges, view, source=str(path))
+    if view == "full":
+        return SnomedGraph(all_names, all_edges, view, source=str(path))
+    names = {c: t for c, t in all_names.items() if is_international(c)}
+    if view == "international-filtered":
+        edges = [(p, c) for p, c in all_edges if is_international(p) and is_international(c)]
+        return SnomedGraph(names, edges, view, source=str(path))
+    edges, stats = project_international(all_edges)
+    return SnomedGraph(names, edges, view, source=str(path), projection=stats)
+
+
+def project_international(edges):
+    """
+    Project a hierarchy classified with extension concepts onto International concepts.
+
+    For each International concept, its projected parents are the nearest
+    International ancestors: a direct International parent, or the first
+    International concepts reached upward through extension-only paths. A
+    candidate that is an ancestor of another candidate is dropped (transitive
+    reduction), so only the most specific parents remain. Returns the edges
+    as (parent, child) pairs and counts describing what changed.
+    """
+    parents = {}
+    for parent, child in edges:
+        parents.setdefault(child, []).append(parent)
+    nearest = {}
+
+    def nearest_international(node):
+        """International concepts reached upward from an extension concept through extension-only paths."""
+        if node not in nearest:
+            nearest[node] = frozenset()   # guards against a cycle among extension concepts
+            found, stack, seen = set(), list(parents.get(node, ())), set()
+            while stack:
+                up = stack.pop()
+                if up in seen:
+                    continue
+                seen.add(up)
+                if is_international(up):
+                    found.add(up)
+                else:
+                    stack.extend(parents.get(up, ()))
+            nearest[node] = frozenset(found)
+        return nearest[node]
+
+    ancestors_cache = {}
+
+    def ancestors(node):
+        if node not in ancestors_cache:
+            seen, stack = set(), list(parents.get(node, ()))
+            while stack:
+                up = stack.pop()
+                if up not in seen:
+                    seen.add(up)
+                    stack.extend(parents.get(up, ()))
+            ancestors_cache[node] = seen
+        return ancestors_cache[node]
+
+    projected, bridged_children, reduced = [], 0, 0
+    for child, ups in parents.items():
+        if not is_international(child):
+            continue
+        direct = {p for p in ups if is_international(p)}
+        via = set()
+        for p in ups:
+            if not is_international(p):
+                via |= nearest_international(p)
+        candidates = direct | via
+        if via - direct:
+            bridged_children += 1
+            keep = {c for c in candidates if not any(c in ancestors(o) for o in candidates if o != c)}
+            reduced += len(candidates) - len(keep)
+            candidates = keep
+        projected.extend((p, child) for p in sorted(candidates))
+    original = sum(1 for p, c in edges if is_international(p) and is_international(c))
+    stats = {"edges_between_international_concepts": original, "projected_edges": len(projected),
+             "children_bridged_over_extensions": bridged_children,
+             "redundant_parents_removed": reduced}
+    return projected, stats
 
 
 def check_graph(graph):
@@ -199,6 +286,7 @@ def check_graph(graph):
     leaves = sum(1 for c in reachable if c not in graph.children)
     return {
         "view": graph.view,
+        "projection": graph.projection,
         "concepts": len(graph.names),
         "edges": graph.edge_count(),
         "roots": roots,
@@ -274,6 +362,11 @@ def main(argv=None):
               f"cycle nodes {s['cycle_nodes']}; not reachable from root {s['not_reachable_from_root']:,}; "
               f"dangling edge ends {s['dangling_edge_ends']}; top-level concepts {s['top_level_concepts']}; "
               f"longest depth {max(map(int, s['depth_longest_histogram']), default=0)}")
+    stats = manifest["views"].get("international", {}).get("projection")
+    if stats:
+        print(f"[international] projection: {stats['edges_between_international_concepts']:,} direct edges -> "
+              f"{stats['projected_edges']:,} projected; {stats['children_bridged_over_extensions']:,} concepts "
+              f"bridged over extension concepts; {stats['redundant_parents_removed']:,} redundant parents removed")
     print(f"SHA-256: {manifest['sha256']}")
     print(f"Manifest written to {out}")
     return 0
