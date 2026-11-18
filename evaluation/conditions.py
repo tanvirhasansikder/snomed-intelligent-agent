@@ -13,6 +13,11 @@ crawler's frontier are captured in a ``Context`` and serialised for prompts:
                 (E1, E2, ...) that claims cite, followed by the same coverage
                 information as ``annotated``. ``Context.edge_index()`` gives
                 the ID -> edge mapping used to check citations.
+* ``v2-nocov``  the same numbered edges as ``v2`` with no coverage, frontier
+                or budget lines (Study 2's "unmarked" evidence, RQ2).
+
+A parent or child list can be ``partial`` when Study 2's completeness mask
+(evaluation/completeness.py) withheld some of its edges.
 """
 
 from collections import deque
@@ -29,7 +34,7 @@ CONDITIONS = {
     "U2D": {"depth": 2, "children": True},
     "FULL": {"depth": 20, "children": True},
 }
-FORMATS = ("plain", "annotated", "v2")
+FORMATS = ("plain", "annotated", "v2", "v2-nocov")
 
 #: App default page cap for children (5 pages x 100) and the cap used for FULL.
 APP_CHILD_PAGES = 5
@@ -152,6 +157,8 @@ class Context:
             return "No evidence was retrieved."
         if fmt == "v2":
             return self._render_v2()
+        if fmt == "v2-nocov":
+            return self._render_v2(coverage=False)
 
         rank = {cid: i for i, cid in enumerate(self._distance_order())}
         edges = sorted(self.edges, key=lambda e: (rank.get(e[0], 1e9), rank.get(e[1], 1e9)))
@@ -172,13 +179,15 @@ class Context:
                              "Their more general ancestors were not retrieved.")
         return "\n".join(lines)
 
-    def _render_v2(self):
+    def _render_v2(self, coverage=True):
         rank = {cid: i for i, cid in enumerate(self._distance_order())}
         lines = ["Retrieved SNOMED CT IS_A edges (child IS_A parent). Cite edges by their IDs."]
         index = self.edge_index()
         lines += [f"{eid}: {self._label(c)} IS_A {self._label(p)}" for eid, (c, p) in index.items()]
         if not index:
             lines.append("(no edges retrieved)")
+        if not coverage:
+            return "\n".join(lines)
         lines.append("")
         lines.append("Retrieval coverage (what was and was not retrieved):")
         for concept_id in sorted(self.nodes, key=lambda c: (rank.get(c, 1e9), c)):
@@ -203,6 +212,8 @@ class Context:
         n = len(self.parents_of(concept_id))
         if status == "complete":
             return f"COMPLETE ({n} listed)" if n else "COMPLETE (none: top of the hierarchy)"
+        if status == "partial":
+            return f"PARTIAL ({n} listed; more may exist)"
         if status == "failed":
             return f"RETRIEVAL FAILED ({n} listed)"
         return "NOT RETRIEVED" + (f" ({n} listed incidentally)" if n else "")
