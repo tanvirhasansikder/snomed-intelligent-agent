@@ -72,3 +72,29 @@ def test_namespace_reads_extension_ids_only():
     assert namespace("442711000124106") == "1000124"
     assert namespace("22298006") is None
     assert namespace("138875005") is None
+
+
+def test_root_adjusted_comparison_ignores_the_root_link_only(tmp_path, monkeypatch):
+    """The database links the top concept to a root; BioPortal lists it without parents (Amendment 2)."""
+    import evaluation.snomed_db_crosscheck as module
+    real_root = "999999009"
+    monkeypatch.setattr(module, "ROOT", real_root)
+    gold = _store(tmp_path)
+    _db(tmp_path).connection.close()
+    con = sqlite3.connect(tmp_path / "snomed.db")
+    con.execute("INSERT INTO concepts (concept_id, term) VALUES (?, 'Root (root)')", (real_root,))
+    con.execute("INSERT INTO edges VALUES (?, ?)", (real_root, TOP))
+    con.commit()
+    con.close()
+
+    result = crosscheck(gold, SnomedDB(tmp_path / "snomed.db"))
+
+    assert result["db_roots"] == [real_root]
+    assert result["db_only_children_by_namespace"] == {"international": 1}   # the extra child under A
+    assert result["absent_by_namespace"] == {"1000124": 1}
+    raw, adjusted = result["direct_parents"], result["direct_parents_root_adjusted"]
+    assert raw["extra_in_db"] == 1 and raw["examples"]["extra_in_db"][0]["only_db"] == [real_root]
+    assert adjusted["compared"] == 5 and adjusted["identical"] == 4 and adjusted["missing_in_db"] == 1
+    assert adjusted["extra_in_db"] == 0
+    assert result["sample_ancestors"]["identical"] == 0
+    assert result["sample_ancestors_root_adjusted"]["identical"] == 1      # S1; S2 still lacks the US parent

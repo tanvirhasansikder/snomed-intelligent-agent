@@ -12,7 +12,11 @@ It compares, using concept IDs only:
 3. direct children of every concept whose child list was stored complete;
 4. full ancestor sets of the sampled concepts;
 5. labels (the database term without its "(semantic tag)" against the BioPortal name);
-6. US-extension concepts (namespace 1000124), a hint at which edition the database holds.
+6. US-extension concepts (namespace 1000124), a hint at which edition the database holds;
+7. the same parent, child and ancestor comparisons "root-adjusted": BioPortal shows the
+   19 top-level hierarchies with no parent (Amendment 2), while the database links them to
+   the SNOMED CT root 138875005, so the root is left out of both sides there;
+8. which namespaces the database-only children come from, and the database's roots.
 
 Nothing is changed. It prints counts and up to 10 example IDs per kind of
 mismatch, and writes the same summary to ``<results_dir>/snomed_db_crosscheck.json``.
@@ -32,6 +36,7 @@ from evaluation.collect import load_config, resolve
 from evaluation.gold import GoldIndex
 
 US_NAMESPACE = "1000124"
+ROOT = "138875005"
 EXAMPLES = 10
 _TAG = re.compile(r"\s*\([^()]*\)\s*$")
 
@@ -71,6 +76,11 @@ class SnomedDB:
             self._ancestors[cid] = seen
         return self._ancestors[cid]
 
+    def roots(self):
+        return [r[0] for r in self.connection.execute(
+            "SELECT DISTINCT parent_id FROM edges WHERE parent_id NOT IN (SELECT child_id FROM edges) "
+            "ORDER BY parent_id")]
+
     def counts(self):
         one = lambda q: self.connection.execute(q).fetchone()[0]  # noqa: E731
         return {"concepts": one("SELECT COUNT(*) FROM concepts"), "edges": one("SELECT COUNT(*) FROM edges"),
@@ -107,6 +117,21 @@ def crosscheck(gold, db):
         "bioportal_concepts": len(known), "absent_from_db": len(absent), "absent_examples": absent[:EXAMPLES],
         "main_samples": len(samples), "main_samples_absent": sorted(c for c in samples if not db.has(c)),
     }
+    drop = lambda values: set(values) - {ROOT}  # noqa: E731
+    result["direct_parents_root_adjusted"] = _compare_sets(
+        {c: (drop(ps), drop(db.parents(c))) for c, ps in gold.parents.items() if db.has(c) and c != ROOT})
+    result["direct_children_root_adjusted"] = _compare_sets(
+        {c: (set(gold.children[c]), db.children(c)) for c in gold.children_complete if db.has(c) and c != ROOT})
+    result["sample_ancestors_root_adjusted"] = _compare_sets(
+        {c: (drop(gold.ancestors(c)), drop(db.ancestors(c))) for c in samples if db.has(c)})
+    extra_children = Counter()
+    for c in gold.children_complete:
+        if db.has(c) and c != ROOT:
+            for child in db.children(c) - set(gold.children[c]):
+                extra_children[namespace(child) or "international"] += 1
+    result["db_only_children_by_namespace"] = dict(extra_children.most_common())
+    result["db_roots"] = db.roots()
+    result["absent_by_namespace"] = dict(Counter(namespace(c) or "international" for c in absent).most_common())
     result["direct_parents"] = _compare_sets(
         {c: (set(ps), db.parents(c)) for c, ps in gold.parents.items() if db.has(c)})
     result["direct_children_complete_lists"] = _compare_sets(
@@ -142,7 +167,10 @@ def _print(result):
     print(f"          main samples absent: {len(cov['main_samples_absent'])} of {cov['main_samples']} "
           f"{cov['main_samples_absent'][:EXAMPLES]}")
     for key, title in (("direct_parents", "Direct parents"), ("direct_children_complete_lists", "Direct children"),
-                       ("sample_ancestors", "Sample ancestors")):
+                       ("sample_ancestors", "Sample ancestors"),
+                       ("direct_parents_root_adjusted", "Direct parents (root-adjusted)"),
+                       ("direct_children_root_adjusted", "Direct children (root-adjusted)"),
+                       ("sample_ancestors_root_adjusted", "Sample ancestors (root-adjusted)")):
         s = result[key]
         print(f"{title}: {s['identical']}/{s['compared']} identical ({s['identical_rate']}); "
               f"missing in db {s['missing_in_db']}, extra in db {s['extra_in_db']}, both differ {s['both_differ']}")
@@ -154,6 +182,9 @@ def _print(result):
           f"examples of different: {lab['different_examples']}")
     print(f"US extension (namespace {US_NAMESPACE}): {us['in_bioportal']} in the BioPortal cache, "
           f"{us['of_these_in_db']} of them in the database")
+    print(f"Database-only children by namespace: {result['db_only_children_by_namespace']}")
+    print(f"Concepts absent from the database by namespace: {result['absent_by_namespace']}")
+    print(f"Database roots ({len(result['db_roots'])}): {result['db_roots']}")
 
 
 def main(argv=None):
