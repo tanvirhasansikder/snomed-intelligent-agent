@@ -14,10 +14,19 @@ How one item is masked
 2. The relevant edges are put in a fixed order with a seeded shuffle; the seed
    is ``f"{seed}:{item_id}"``, so the order depends only on the item, not on
    which other items are in the run.
-3. Level ``f`` withholds the first ``round_half_up(f * n)`` edges of that
-   order. Removals are therefore nested: whatever is missing at 25 % is also
-   missing at 50 % and 75 %, so a change between levels is caused only by the
-   extra removals.
+3. Level ``f`` withholds the first ``max(1, round_half_up(f * n))`` edges of
+   that order (none at f = 0). Removals are therefore nested: whatever is
+   missing at 25 % is also missing at 50 % and 75 %, so a change between
+   levels is caused only by the extra removals.
+
+Random-removal control
+----------------------
+Withholding answer-relevant edges also shrinks the evidence. To separate the
+two, the control withholds the same number of edges from the evidence the
+answer does NOT need (``pool="random"``, run at ``CONTROL_LEVEL``). If
+faithfulness changes only under the relevant mask, the effect is caused by the
+missing facts, not by less evidence. (Idea from MissDiag's removal operators;
+see docs/LITERATURE_SEARCH.md, 2026-11-18.)
 4. Only those edges are removed. Concepts stay in the evidence unless the
    removal leaves them with no edge at all (then they are dropped, because a
    crawler that never saw the edge would not have seen the concept either).
@@ -42,8 +51,10 @@ import random
 from dataclasses import replace
 
 LEVELS = (0.0, 0.25, 0.5, 0.75)
+CONTROL_LEVEL = 0.5          # the random-removal control is run at this level only
+POOLS = ("relevant", "random")
 VARIANTS = {"marked": "v2", "unmarked": "v2-nocov"}
-MASK_VERSION = "1"
+MASK_VERSION = "2"           # 2: at least one edge above 0 %; random-removal control (novelty audit 2026-11-18)
 
 
 def evidence_format(variant):
@@ -54,10 +65,17 @@ def evidence_format(variant):
 
 
 def n_withheld(n_relevant, fraction):
-    """Number of edges withheld at ``fraction``: f * n rounded half up (monotone in f, so levels nest)."""
+    """
+    Number of edges withheld at ``fraction``: f * n rounded half up, and at
+    least one whenever f > 0 and there is an edge to withhold (as MissDiag's
+    max(1, round(a * n)) budget), so a level above 0 % never equals 0 %.
+    Still monotone in f, so the levels nest.
+    """
     if not 0.0 <= fraction <= 1.0:
         raise ValueError("fraction must be between 0 and 1")
-    return min(n_relevant, math.floor(fraction * n_relevant + 0.5))
+    if fraction == 0 or n_relevant == 0:
+        return 0
+    return min(n_relevant, max(1, math.floor(fraction * n_relevant + 0.5)))
 
 
 # ----------------------------------------------------------------------
@@ -120,10 +138,20 @@ def relevant_edges(item, context):
     return sorted(found)
 
 
-def removal_order(item, context, seed):
-    """Relevant edges in the seeded order in which they are withheld."""
-    order = relevant_edges(item, context)
-    random.Random(f"{seed}:{item.item_id}").shuffle(order)
+def removal_order(item, context, seed, pool="relevant"):
+    """
+    Edges in the seeded order in which they are withheld. ``pool`` is
+    ``relevant`` (the answer-relevant edges) or ``random`` (the control: the
+    evidence edges the answer does NOT need, drawn with their own seed).
+    """
+    relevant = relevant_edges(item, context)
+    if pool == "relevant":
+        order, tag = relevant, ""
+    elif pool == "random":
+        order, tag = sorted(context.edges - set(relevant)), ":random"
+    else:
+        raise ValueError(f"pool must be one of {POOLS}")
+    random.Random(f"{seed}:{item.item_id}{tag}").shuffle(order)
     return order
 
 
@@ -138,17 +166,25 @@ def _copy(context):
                    failed=set(context.failed), budget_stopped=set(context.budget_stopped))
 
 
-def mask_context(context, item, fraction, seed):
+def mask_context(context, item, fraction, seed, pool="relevant"):
     """
     (masked copy of ``context``, record). The input context is not changed.
+
+    ``pool="relevant"`` withholds answer-relevant edges (RQ1). ``pool="random"``
+    is the control: it withholds the SAME number of edges as the relevant mask
+    at this fraction, drawn from the edges the answer does not need. If fewer
+    such edges exist, all of them are withheld and the shortfall is recorded
+    (``n_short``); those items are excluded from the matched comparison.
 
     The record holds what an analysis needs per item and level: the number of
     relevant and withheld edges, the realised fraction (n_withheld / n_relevant,
     which differs from ``fraction`` for small n), the withheld edges, the lists
     marked partial and the concepts dropped.
     """
-    order = removal_order(item, context, seed)
-    k = n_withheld(len(order), fraction)
+    n_relevant = len(relevant_edges(item, context))
+    target = n_withheld(n_relevant, fraction)
+    order = removal_order(item, context, seed, pool)
+    k = min(target, len(order))
     withheld = order[:k]
     masked = _copy(context)
     masked.edges -= set(withheld)
@@ -182,10 +218,13 @@ def mask_context(context, item, fraction, seed):
     record = {
         "mask_version": MASK_VERSION,
         "mask_seed": seed,
+        "pool": pool,
         "fraction": fraction,
-        "n_relevant": len(order),
+        "n_relevant": n_relevant,
+        "n_pool": len(order),
         "n_withheld": k,
-        "realised_fraction": (k / len(order)) if order else None,
+        "n_short": target - k,
+        "realised_fraction": (k / n_relevant) if n_relevant else None,
         "withheld_edges": [list(e) for e in withheld],
         "parents_marked_partial": sorted(parents_marked),
         "children_marked_partial": sorted(children_marked),
@@ -194,6 +233,6 @@ def mask_context(context, item, fraction, seed):
     return masked, record
 
 
-def mask_levels(context, item, seed, levels=LEVELS):
+def mask_levels(context, item, seed, levels=LEVELS, pool="relevant"):
     """{fraction: (masked context, record)} for every level, all from one removal order."""
-    return {f: mask_context(context, item, f, seed) for f in levels}
+    return {f: mask_context(context, item, f, seed, pool) for f in levels}

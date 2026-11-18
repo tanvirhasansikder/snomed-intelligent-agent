@@ -6,7 +6,7 @@ import pytest
 
 from crawler.local_client import LocalTerminologyClient
 from evaluation.completeness import (
-    LEVELS, evidence_format, mask_context, mask_levels, n_withheld, relevant_edges, removal_order,
+    CONTROL_LEVEL, LEVELS, evidence_format, mask_context, mask_levels, n_withheld, relevant_edges, removal_order,
 )
 from evaluation.tasks import Item, answer_in_evidence, reference_answer, sufficient
 from knowledge_graph.snomed_db_loader import ROOT_ID
@@ -58,10 +58,14 @@ def contexts(client):
 
 
 def test_rounding_is_half_up_and_monotone():
-    assert [n_withheld(1, f) for f in LEVELS] == [0, 0, 1, 1]
+    assert [n_withheld(1, f) for f in LEVELS] == [0, 1, 1, 1]       # at least one above 0 %
     assert [n_withheld(2, f) for f in LEVELS] == [0, 1, 1, 2]
     assert [n_withheld(4, f) for f in LEVELS] == [0, 1, 2, 3]
+    assert [n_withheld(10, f) for f in LEVELS] == [0, 3, 5, 8]
     assert n_withheld(0, 0.75) == 0
+    for n in range(0, 30):                                           # monotone, so levels nest
+        counts = [n_withheld(n, f) for f in LEVELS]
+        assert counts == sorted(counts) and counts[-1] <= n
     with pytest.raises(ValueError):
         n_withheld(3, 1.5)
 
@@ -157,3 +161,30 @@ def test_focal_and_partner_concepts_always_stay(contexts):
         assert item.concept_id in masked.nodes
         if item.task == "T6":
             assert item.target_id in masked.nodes
+
+
+def test_random_control_matches_the_count_but_avoids_answer_edges(contexts):
+    item, context = ITEMS["T6"], contexts["T6"]
+    relevant = set(relevant_edges(item, context))
+    real, real_record = mask_context(context, item, CONTROL_LEVEL, SEED)
+    ctrl, ctrl_record = mask_context(context, item, CONTROL_LEVEL, SEED, pool="random")
+    removed = set(map(tuple, ctrl_record["withheld_edges"]))
+    assert ctrl_record["pool"] == "random" and not removed & relevant          # never an answer edge
+    assert ctrl_record["n_withheld"] + ctrl_record["n_short"] == real_record["n_withheld"]   # matched count
+    assert relevant <= ctrl.edges                                              # the answer's edges all stay
+    again = mask_context(context, item, CONTROL_LEVEL, SEED, pool="random")[1]
+    assert again == ctrl_record                                                # seeded
+    levels = mask_levels(context, item, SEED, pool="random")
+    sets = [set(map(tuple, levels[f][1]["withheld_edges"])) for f in LEVELS]
+    assert all(a <= b for a, b in zip(sets, sets[1:]))                         # nested too
+
+
+def test_random_control_records_a_shortfall_when_every_edge_is_needed(contexts):
+    item, context = ITEMS["T1"], contexts["T1"]
+    record = mask_context(context, item, CONTROL_LEVEL, SEED, pool="random")[1]
+    needed = n_withheld(len(relevant_edges(item, context)), CONTROL_LEVEL)
+    assert record["n_pool"] == len(context.edges - set(relevant_edges(item, context)))
+    assert record["n_withheld"] == min(needed, record["n_pool"])
+    assert record["n_short"] == needed - record["n_withheld"]
+    with pytest.raises(ValueError):
+        mask_context(context, item, 0.5, SEED, pool="everything")

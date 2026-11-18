@@ -17,6 +17,11 @@ Purpose: decide what is already known before claiming any contribution. This is 
 | 2026-11-02 | same | BioPortal SNOMED CT LLM explanation hierarchy navigation tool | Dilworth et al. 2025 (arXiv 2511.16698) |
 | 2026-11-02 | same | knowledge graph completeness closed/open world assumption absence of evidence | Razniewski et al. 2024 (ACM Computing Surveys) |
 | 2026-11-04 | same | Chain-of-Verification hallucination; LLMs cannot self-correct reasoning (for the S2 regeneration design) | Dhuliawala et al. 2024 (Findings of ACL); Huang et al. 2024 (ICLR) |
+| 2026-11-18 | same (Study 2 novelty audit) | knowledge graph incompleteness RAG robustness missing triples; incomplete KGQA benchmark removed edges | Wang et al. 2026 MissDiag (arXiv 2608.18489); Zhou et al. 2026 BRINK (EACL); Xu et al. 2024 (EMNLP) |
+| 2026-11-18 | same | sufficient context abstention; grounded refusal citation benchmark | Joren et al. 2025 (ICLR); Song et al. 2025 Trust-Score (ICLR) |
+| 2026-11-18 | same | LLM told retrieved context is incomplete; completeness signal abstention | Min et al. 2026 CROWN-QA (arXiv 2608.04591); Zerhoudi et al. 2026 (ECML-PKDD) |
+| 2026-11-18 | same | GraphRAG vs RAG systematic comparison | Han et al. 2026 (KDD; arXiv 2502.11371) |
+| 2026-11-18 | same | SNOMED CT LLM journal; KG RAG biomedical journal; ontology-grounded RAG | Soman et al. 2024 (Bioinformatics); Hu et al. 2026 (arXiv 2608.28360); Sharma et al. 2025 OG-RAG (EMNLP); Do et al. (arXiv 2409.13746); Kaur 2026 (NeurIPS WiML poster); Ali et al. 2026 (JBI, re-confirmed via Crossref) |
 
 Still to do before submission: PubMed and IEEE Xplore keyword searches with recorded hit counts; forward-citation search from Zhou et al. 2026, Joren et al. 2025 and Chang & Sung 2024.
 
@@ -36,7 +41,31 @@ Still to do before submission: PubMed and IEEE Xplore keyword searches with reco
 | [Razniewski et al., ACM Computing Surveys 2024](https://arxiv.org/abs/2305.05403v2) | Survey of completeness, recall and negation in open-world KBs | Conceptual basis for completeness metadata; not about LLM grounding |
 | [Vaidya et al., arXiv 2610.00682](https://arxiv.org/html/2610.00682v1) | Reasoner-verified MCQ benchmarks from OWL ontologies (incl. DOID) | Benchmark generation from complete ontologies; no partial retrieval |
 
-## Assessment (our judgement, to be re-checked)
+### Added in the Study 2 novelty audit (2026-11-18, all opened)
+
+Full matrix with data, metrics and numbers: the "Study 2 Novelty Audit and Literature Matrix" doc (claude.ai artifact MndKj26S19LUuG5gLv9kKw) and the project copy of this file.
+
+| Work | What it shows | How Study 2 differs |
+| --- | --- | --- |
+| [Wang et al., MissDiag, preprint 2026](https://arxiv.org/pdf/2608.18489) | Removes support edges by four operators (random, source-context, relation-level, answer-adjacent) at severity 0.1/0.3/0.5; answer-adjacent removal hurts most (−10.3 to −21.3 F1 at 0.3) | Closest RQ1 design, but F1 only: no unsupported claims, abstention or coverage signal. We adopt its random-removal control idea |
+| [Min et al., CROWN-QA, preprint 2026](https://arxiv.org/pdf/2608.04591) | Completeness cues decide whether absence justifies "no"; naive prompting over-closes 37–76%; partial lists often treated as complete | Closest RQ2 work; synthetic natural-language text, negatives only, no KG. Ours: retriever-generated per-list marks, all six tasks, crossed with removal level. We adopt its over/under-closure rates |
+| [Song et al., Trust-Score, ICLR 2025](https://proceedings.iclr.cc/paper_files/paper/2025/hash/4c88827decab6c046b881a2c3a99c76f-Abstract-Conference.html) | Grounded-refusal and citation metrics, NLI-judged | We compute grounded-refusal F1 with exact labels |
+| [Han et al., RAG vs. GraphRAG, KDD 2026](https://arxiv.org/html/2502.11371) | Text RAG wins single-hop, graph wins multi-hop; token budgets differ | RQ4 replicates this on an ontology with exact gold; we add a size-matched text baseline |
+| [Soman et al., Bioinformatics 40(9):btae560, 2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11441322) | SPOKE KG-RAG raises disease-question accuracy | Accuracy only; no faithfulness or completeness |
+| [Zerhoudi et al., ECML-PKDD 2026](https://arxiv.org/pdf/2606.29645) | Most context metadata lowers accuracy | Warns that coverage marks may hurt: report harms |
+| [Hu et al., preprint 2026](https://arxiv.org/pdf/2608.28360) | Unsupported-claim rate and invalid citations in guideline KG QA | LLM judge equals generator; no controlled removal |
+| [Kaur, NeurIPS 2026 WiML poster](https://neurips.cc/virtual/2026/179139) | SNOMED-based hybrid KG-RAG; GPT-4 unsupported claims 18.7% → 12.8% | Poster; no incomplete evidence or abstention |
+| [He et al., Findings of ACL 2023](https://aclanthology.org/2023.findings-acl.213); [Sharma et al., EMNLP 2025](https://aclanthology.org/2025.emnlp-main.1674/); [Do et al.](https://arxiv.org/pdf/2409.13746) | Ontology subsumption probing; ontology-grounded RAG; GPT-4 confabulates rare ontology IDs | Context and metric support (invented-ID rate) |
+
+## Assessment, updated 2026-11-18 (Study 2)
+
+Removing knowledge-graph evidence in controlled amounts is **not** new (Xu et al. 2024; Zhou et al. 2026; Wang et al. 2026), and neither is "insufficient context causes hallucination" (Joren et al. 2025) or "graph helps multi-hop" (Han et al. 2026). Those prior studies measure accuracy only.
+
+**Contribution Study 2 claims (if results hold, "to our knowledge"):** how controlled, answer-relevant evidence loss changes the evidential faithfulness of LLM answers about the SNOMED CT hierarchy — unsupported claims, appropriate abstention, over-claimed negatives, invented IDs — labelled deterministically against an exact reference, with a matched random-removal control; whether retriever-generated coverage marks change it (concurrent: Min et al. 2026); and what deterministic verification costs at each completeness level.
+
+**Design changes adopted from this audit:** random-removal control at the 50% level; at least one withheld edge above 0%; faithfulness outcomes primary, accuracy secondary; size-matched text baseline; results split by whether the answer stays derivable through another path.
+
+## Assessment (Study 1, our judgement, to be re-checked)
 
 **Established:** (1) LLMs hallucinate SNOMED CT identifiers when ungrounded; (2) KG grounding reduces hallucination when the graph is complete; (3) KG-RAG degrades and falls back on memorisation when the graph is incomplete; (4) models often answer instead of abstaining when context is insufficient.
 
