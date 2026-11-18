@@ -224,6 +224,8 @@ crawler_state/
 data/bioportal_cache/
 data/datasets/
 data/synthetic/
+data/snomed_db/
+*.db
 results/
 
 # LaTeX build files
