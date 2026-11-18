@@ -315,6 +315,8 @@ def _main(argv=None):
 
     config = load_config(args.config)
     models = [m for m in config.get("models", []) if not args.models or m["name"] in args.models]
+    if config.get("experiment", {}).get("study") == 2:
+        return _main_systems(config, models, args, study=2)
     if "systems" in config.get("experiment", {}):
         return _main_systems(config, models, args)
     experiment = Experiment(config)
@@ -345,20 +347,32 @@ def _main(argv=None):
           f"Results: {experiment.responses_path}")
 
 
-def _main_systems(config, models, args):
-    """Protocol v2.0: systems R0/B0/B1/S1/S2 through the shared pipeline (evaluation/system_runner.py)."""
-    from evaluation.system_runner import SystemExperiment
-
+def _main_systems(config, models, args, study=1):
+    """
+    Protocol v2.0: systems R0/B0/B1/S1/S2 through the shared pipeline (evaluation/system_runner.py).
+    Protocol v3 (``"study": 2``): conditions on the local graph (evaluation/study2_runner.py).
+    """
     logging.getLogger("crawler").setLevel(logging.ERROR)  # budget refusals are recorded in the evidence, not logged
-    experiment = SystemExperiment(config)
+    if study == 2:
+        from evaluation.study2_runner import Study2Experiment
+        experiment = Study2Experiment(config)
+        shown = [c.name for c in experiment.conditions]
+    else:
+        from evaluation.system_runner import SystemExperiment
+        experiment = SystemExperiment(config)
+        shown = experiment.systems
     print(f"Items: {len(experiment.items)} | concepts: {len({i.concept_id for i in experiment.items})} | "
-          f"systems: {experiment.systems} | models: {[m['name'] for m in models]}")
+          f"{'conditions' if study == 2 else 'systems'}: {shown} | models: {[m['name'] for m in models]}")
     if args.dry_run:
         for name, entry in experiment.estimate_systems(models).items():
-            print(f"{name}: up to {entry['calls']} new calls (S2 counted as one regeneration each), "
+            print(f"{name}: up to {entry['calls']} new calls (verification counted as one regeneration each), "
                   f"~{entry['prompt_tokens_est']:,} prompt tokens, <= {entry['max_completion_tokens']:,} completion tokens")
+            for condition, calls in entry.get("by_condition", {}).items():
+                print(f"    {condition}: {calls}")
+        for condition, ids in getattr(experiment, "skipped", {}).items():
+            print(f"    {condition}: {len(ids)} items skipped (random control could not be matched)")
         return
-    run_info = {"config": {k: v for k, v in config.items() if not k.startswith("_")}, "runner": "systems",
+    run_info = {"config": {k: v for k, v in config.items() if not k.startswith("_")}, "runner": "study2" if study == 2 else "systems",
                 "code_revision": git_revision(), "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "dataset_release": experiment.dataset.get("release"),
                 "dataset_synthetic": experiment.dataset.get("synthetic")}

@@ -1,7 +1,6 @@
 {
   "name": "v3_pilot",
   "_note_source": "Study 2 (protocol v3): the supervisor's snomed.db, International view (release 2026-02-01), read through crawler/local_client.py. Run: python -m evaluation.collect --config <this file> --local data/snomed_db/snomed.db",
-  "_note_experiment": "The experiment and models sections are added with the retrieval conditions (next tasks), before protocol v3 is frozen.",
   "cache_path": "data/local_cache/v3_calls.jsonl",
   "dataset_path": "data/datasets/v3_pilot.json",
   "results_dir": "results/v3_pilot",
@@ -34,5 +33,73 @@
       "data/datasets/pilot.json",
       "data/datasets/main.json"
     ]
-  }
+  },
+  "llm_cache_path": "results/llm_cache_v3.jsonl",
+  "retrieval_source": {
+    "local_db": "data/snomed_db/snomed.db",
+    "view": "international",
+    "dense_dir": "data/snomed_db/dense",
+    "query_vectors": "query_vectors_v3_pilot.npz"
+  },
+  "experiment": {
+    "study": 2,
+    "_note": "Protocol v3, CSE499 stage (free tier): levels 0 and 50 %, marked/unmarked, random control at 50 %. G-UP and repeat runs are left out to fit the free quota; the paper stage adds 25/75 %, G-UP and the full item set.",
+    "conditions": [
+      "B0",
+      "L-RAG",
+      "D-RAG",
+      "G-QA",
+      "G-QA:unmarked",
+      "G-QA@50",
+      "G-QA@50:unmarked",
+      "G-QA@50:random",
+      "G-QA+V",
+      "G-QA+V@50",
+      "G-QA+V@50:random"
+    ],
+    "tasks": [
+      "T1",
+      "T2",
+      "T3",
+      "T4",
+      "T5",
+      "T6"
+    ],
+    "subset": {
+      "per_task": 6,
+      "seed": 2026111904
+    },
+    "request_budget": 1000,
+    "item_seed": 0,
+    "mask_seed": 2026111903,
+    "text_k": 10,
+    "repeat_subset_fraction": 0.0,
+    "repeat_count": 1,
+    "child_display_cap": 100
+  },
+  "models": [
+    {
+      "name": "gemini-flash-lite",
+      "provider": "gemini",
+      "model": "gemini-3.5-flash-lite",
+      "temperature": 0.0,
+      "max_tokens": 8192,
+      "json_mode": true,
+      "rpm": 12,
+      "max_retries": 1,
+      "extra_body": {
+        "reasoning_effort": "low"
+      }
+    },
+    {
+      "name": "gemma-4-31b",
+      "provider": "gemini",
+      "model": "gemma-4-31b-it",
+      "temperature": 0.0,
+      "max_tokens": 8192,
+      "json_mode": true,
+      "rpm": 10,
+      "max_retries": 4
+    }
+  ]
 }
