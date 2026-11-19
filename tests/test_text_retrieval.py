@@ -147,3 +147,26 @@ def test_dense_search_orders_by_cosine_and_breaks_ties_by_id():
     assert dense_search([1, 0], matrix, ids, k=3) == ["c", "a", "b"]
     assert dense_search([0, 1], matrix, ids, k=2) == ["d", "a"]
     assert dense_search([0, 1], matrix, ids, k=10) == ["d", "a", "b", "c"]
+
+
+def test_card_evidence_stays_inside_the_evaluation_view(store, db):
+    from evaluation.tasks import reference_answer
+    from evaluation.text_retrieval import restrict_to_view
+    view = load_graph(db, "international")
+    text = CARDS[MI].replace("Old myocardial infarction (+1 more)",
+                             "Old myocardial infarction; Myocardial infarction UK grouper")
+    full = link_card(MI, text, store)
+    assert (UK, MI) in full["edges"]                                   # the whole database knows the UK child
+    inside, outside = restrict_to_view(full, MI, view)
+    assert outside == 1 and inside["outside_view"] == 1
+    assert ("Myocardial infarction UK grouper", None) in inside["children"]   # name kept, no ID
+    assert (UK, MI) not in inside["edges"] and (AMI, MI) in inside["edges"]
+
+    store.card = lambda cid: text if cid == MI else CARDS.get(cid)
+    item = Item(f"T2:{MI}", "T2", MI, sorted([AMI, OLD]))
+    context = card_context(item, [MI], store, "L-RAG", view=view)
+    assert UK not in context.nodes
+    assert context.children_status[MI] == "complete"                   # complete against the International view
+    rendered = context.render(CARD_FORMAT)
+    assert "Myocardial infarction UK grouper" in rendered and UK not in rendered
+    assert set(reference_answer(item, context)["answer"]) == {AMI, OLD}

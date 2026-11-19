@@ -52,7 +52,7 @@ from evaluation.conditions import Context
 SYSTEMS = {"L-RAG": "lexical", "D-RAG": "dense"}
 DEFAULT_K = 10
 CARD_FORMAT = "cards"
-TEXT_RETRIEVAL_VERSION = "2"  # 2: entity-name queries (1: whole question, never used in a run)
+TEXT_RETRIEVAL_VERSION = "3"  # 3: evidence restricted to the evaluation view; 2: entity-name queries
 
 _FIELD = re.compile(r"^([A-Za-z][A-Za-z \-]*?):\s?(.*)$")
 _MORE = re.compile(r"\s*\(\+(\d+) more\)\s*$")
@@ -234,8 +234,31 @@ class CardContext(Context):
         return "\n".join(lines)
 
 
-def card_context(item, card_ids, store, system):
-    """The evidence context for ``item`` from the cards of ``card_ids`` (rank order)."""
+def restrict_to_view(card, concept_id, view):
+    """
+    Keep a linked card inside the evaluation view (e.g. the International
+    view): names of concepts outside it lose their ID, and only IS_A links
+    that exist in the view stay as evidence edges. The card text is unchanged.
+    Returns (card, number of names outside the view).
+    """
+    inside = lambda c: c is not None and c in view          # noqa: E731
+    outside = sum(1 for _, c in card["parents"] + card["children"] + card["path"] if c is not None and c not in view)
+    card = dict(card)
+    card["parents"] = [(n, c if inside(c) else None) for n, c in card["parents"]]
+    card["children"] = [(n, c if inside(c) else None) for n, c in card["children"]]
+    card["path"] = [(n, c if inside(c) else None) for n, c in card["path"]]
+    card["edges"] = {(c, p) for c, p in card["edges"] if inside(c) and p in view.parents_of(c)}
+    card["outside_view"] = outside
+    return card, outside
+
+
+def card_context(item, card_ids, store, system, view=None):
+    """
+    The evidence context for ``item`` from the cards of ``card_ids`` (rank
+    order). With ``view`` (a SnomedGraph, e.g. the International view used for
+    scoring), the evidence is restricted to that view and list completeness is
+    judged against it; without it, against the whole database.
+    """
     context = CardContext(condition=system, focal_id=item.concept_id)
     context.cards = []
     for concept_id in card_ids:
@@ -243,13 +266,17 @@ def card_context(item, card_ids, store, system):
         if text is None:
             continue
         card = link_card(concept_id, text, store)
+        if view is not None:
+            card, _ = restrict_to_view(card, concept_id, view)
+            all_parents, all_children = view.parents_of(concept_id), view.children_of(concept_id)
+        else:
+            all_parents, all_children = store.parents(concept_id), store.children(concept_id)
         context.cards.append((concept_id, card))
         context.edges |= card["edges"]
         for _, cid in card["parents"] + card["children"] + card["path"]:
             if cid:
                 context.nodes[cid] = store.label(cid)
         context.nodes[concept_id] = store.label(concept_id)
-        all_parents, all_children = store.parents(concept_id), store.children(concept_id)
         named_parents = {p for _, p in card["parents"] if p}
         named_children = {c for _, c in card["children"] if c}
         context.parents_status[concept_id] = "complete" if named_parents == set(all_parents) else "partial"
@@ -344,5 +371,6 @@ def retrieval_record(item, system, card_ids, queries, context):
                              if item.target_id and item.target_id in card_ids else None),
         "edges": len(context.edges),
         "unmatched_names": sum(card["unmatched"] for _, card in context.cards),
+        "outside_view_names": sum(card.get("outside_view", 0) for _, card in context.cards),
     }
 

@@ -75,7 +75,7 @@ def main(argv=None):
         ids, queries = retrieve(item)
         query = " | ".join(queries)
         search_ms.append((time.perf_counter() - t0) * 1000)
-        text_ctx = card_context(item, ids, store, args.system)
+        text_ctx = card_context(item, ids, store, args.system, view=client.graph)
         graph_ctx = build_s1_context(client, item, budget=args.budget)
         requests.append(graph_ctx.requests_used or 0)
         stopped += bool(graph_ctx.budget_stopped)

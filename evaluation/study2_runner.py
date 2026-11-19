@@ -210,7 +210,7 @@ class Study2Experiment(SystemExperiment):
                     from evaluation.dense_retrieval import dense_retrieve
                     index, vectors = self._dense_parts()
                     ids, queries = dense_retrieve(item, index, vectors, self.local.label, k=self.text_k)
-                context = card_context(item, ids, self.card_store, retrieval)
+                context = card_context(item, ids, self.card_store, retrieval, view=self.local.graph)
                 text_record = retrieval_record(item, retrieval, ids, queries, context)
                 requests = 0
             else:
@@ -269,7 +269,8 @@ class Study2Experiment(SystemExperiment):
             row.update({"text_queries": text_record["queries"], "text_cards": text_record["cards"],
                         "text_focal_card_rank": text_record["focal_card_rank"],
                         "text_target_card_rank": text_record["target_card_rank"],
-                        "text_unmatched_names": text_record["unmatched_names"]})
+                        "text_unmatched_names": text_record["unmatched_names"],
+                        "text_outside_view_names": text_record["outside_view_names"]})
         return row
 
     def run_reference(self):
