@@ -2,14 +2,14 @@
 // Used for a concept's lineage (Explore) and for an answer's evidence (Ask).
 import { memo, useEffect, useMemo } from "react";
 import {
-  Background, Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow,
+  Controls, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider, useReactFlow,
   type Edge, type Node, type NodeProps,
 } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 
 export type GraphNode = {
   id: string; name: string; tag?: string | null;
-  variant: "focus" | "ancestor" | "child" | "target" | "evidence" | "withheld" | "outside";
+  variant: "focus" | "ancestor" | "child" | "target" | "evidence" | "withheld" | "outside" | "more";
   note?: string;
 };
 export type GraphEdge = {
@@ -18,23 +18,24 @@ export type GraphEdge = {
   label?: string;
 };
 
-const W = 216;
-const H = 72;
+const W = 196;
+const H = 46;
 
 const NODE_STYLE: Record<GraphNode["variant"], string> = {
-  focus: "bg-ink text-white border-ink",
-  target: "bg-surface text-ink border-ink border-2",
-  ancestor: "bg-surface text-ink border-rule-strong",
-  evidence: "bg-surface text-ink border-rule-strong",
-  child: "bg-paper text-ink-2 border-rule border-dashed",
-  withheld: "bg-paper text-ink-3 border-rule border-dashed",
-  outside: "bg-wash text-ink-3 border-rule",
+  focus: "bg-ink text-white border-ink shadow-[0_6px_16px_-6px_rgba(20,33,61,.55)]",
+  target: "bg-surface text-ink border-ink ring-1 ring-ink",
+  ancestor: "bg-surface text-ink border-[#D3D9E2]",
+  evidence: "bg-surface text-ink border-[#D3D9E2]",
+  child: "bg-[#FAFBFC] text-ink-2 border-[#E1E5EB]",
+  withheld: "bg-transparent text-ink-3 border-dashed border-ink-4",
+  outside: "bg-wash text-ink-2 border-[#D3D9E2]",
+  more: "bg-transparent text-ink-3 border-dashed border-[#C5CCD7] rounded-full",
 };
 
 const EDGE_STYLE: Record<NonNullable<GraphEdge["variant"]>, { stroke: string; dash?: string; width: number }> = {
-  plain: { stroke: "#B4BCC9", width: 1.4 },
-  muted: { stroke: "#CBD1DB", width: 1.2, dash: "4 4" },
-  evidence: { stroke: "#8D97A9", width: 1.5 },
+  plain: { stroke: "#BCC4CF", width: 1.25 },
+  muted: { stroke: "#D3D9E1", width: 1.25 },
+  evidence: { stroke: "#9AA3B3", width: 1.4 },
   withheld: { stroke: "#B4BCC9", width: 1.4, dash: "2 5" },
   supported: { stroke: "#0E8A6A", width: 2.6 },
   memory: { stroke: "#B7791F", width: 2.6, dash: "7 5" },
@@ -45,17 +46,14 @@ const EDGE_STYLE: Record<NonNullable<GraphEdge["variant"]>, { stroke: string; da
 type Data = GraphNode & { onOpen?: (id: string) => void };
 
 const ConceptNode = memo(({ data }: NodeProps<Node<Data>>) => {
-  const clickable = !!data.onOpen && data.variant !== "focus";
+  const clickable = !!data.onOpen && data.variant !== "focus" && data.variant !== "more";
   return (
     <div
-      className={`group flex h-[72px] w-[216px] flex-col justify-center rounded-lg border px-3 py-2 shadow-node transition-colors ${NODE_STYLE[data.variant]} ${clickable ? "cursor-pointer hover:border-ink" : ""}`}
-      title={data.note ? `${data.name}: ${data.note}` : `${data.name}${data.tag ? ` (${data.tag})` : ""}`}
+      className={`flex h-[46px] w-[196px] items-center rounded-lg border px-3 transition-[border-color,box-shadow] ${NODE_STYLE[data.variant]} ${clickable ? "cursor-pointer hover:border-ink/60 hover:shadow-node" : ""} ${data.variant === "more" ? "justify-center" : ""}`}
+      title={data.variant === "more" ? data.name : `${data.name}${data.tag ? ` (${data.tag})` : ""}\n${data.id}${data.note ? `\n${data.note}` : ""}`}
     >
       <Handle type="target" position={Position.Top} />
-      <div className="line-clamp-2 text-[13px] font-medium leading-[17px]">{data.name}</div>
-      <div className={`mt-0.5 truncate font-mono text-[10.5px] ${data.variant === "focus" ? "text-white/65" : "text-ink-4"}`}>
-        {data.id}{data.tag ? ` ${data.tag}` : ""}
-      </div>
+      <span className={`line-clamp-2 text-[13px] leading-[16px] ${data.variant === "focus" ? "font-semibold" : "font-medium"}`}>{data.name}</span>
       <Handle type="source" position={Position.Bottom} />
     </div>
   );
@@ -65,7 +63,7 @@ const nodeTypes = { concept: ConceptNode };
 
 function layout(nodes: GraphNode[], edges: GraphEdge[]) {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "TB", nodesep: 26, ranksep: 54, marginx: 16, marginy: 16 });
+  g.setGraph({ rankdir: "TB", nodesep: 18, ranksep: 46, marginx: 16, marginy: 16 });
   g.setDefaultEdgeLabel(() => ({}));
   nodes.forEach((n) => g.setNode(n.id, { width: W, height: H }));
   edges.forEach((e) => g.setEdge(e.parent, e.child));
@@ -91,26 +89,25 @@ function Inner({ nodes, edges, onOpen, height, fitKey, focusIds, scrollPans }: P
     const rfEdges: Edge[] = kept.map((e) => {
       const s = EDGE_STYLE[e.variant ?? "plain"];
       return {
-        id: `${e.parent}-${e.child}-${e.variant ?? ""}`, source: e.parent, target: e.child, type: "smoothstep",
+        id: `${e.parent}-${e.child}-${e.variant ?? ""}`, source: e.parent, target: e.child, type: "default",
         label: e.label, labelStyle: { fontSize: 10.5, fontFamily: "IBM Plex Mono", fill: "#5E6982" },
         labelBgStyle: { fill: "#F3F5F7" }, labelBgPadding: [3, 2] as [number, number],
         style: { stroke: s.stroke, strokeWidth: s.width, strokeDasharray: s.dash },
-        markerStart: { type: MarkerType.ArrowClosed, color: s.stroke, width: 14, height: 14 },
+        markerStart: ["plain", "muted"].includes(e.variant ?? "plain") ? undefined : { type: MarkerType.ArrowClosed, color: s.stroke, width: 13, height: 13 },
         selectable: false, focusable: false,
       };
     });
     return { rfNodes, rfEdges };
   }, [nodes, edges, onOpen]);
 
-  // small graphs fit whole; big ones open centred on the first focus node at a readable zoom,
-  // a little above it so its parents show (the fit button in the corner shows everything)
+  // small graphs fit whole; big ones open on the focus neighbourhood (the corner button fits everything)
   useEffect(() => {
     const t = setTimeout(() => {
-      const focus = focusIds?.[0] && rfNodes.find((n) => n.id === focusIds[0]);
+      const focus = focusIds?.[0] ? rfNodes.find((n) => n.id === focusIds[0]) : undefined;
       if (rfNodes.length > BIG && focus) {
-        flow.setCenter(focus.position.x + W / 2, focus.position.y + H / 2 - 110, { zoom: 0.9, duration: 300 });
+        flow.setCenter(focus.position.x + W / 2, focus.position.y + H / 2 - 70, { zoom: 1, duration: 300 });
       } else {
-        flow.fitView({ padding: 0.12, duration: 300, maxZoom: 1.05 });
+        flow.fitView({ padding: 0.12, duration: 300, minZoom: 0.72, maxZoom: 1.1 });
       }
     }, 30);
     return () => clearTimeout(t);
@@ -125,8 +122,7 @@ function Inner({ nodes, edges, onOpen, height, fitKey, focusIds, scrollPans }: P
         onNodeDoubleClick={(_, n) => onOpen?.(n.id)}
         panOnScroll={!!scrollPans} preventScrolling={!!scrollPans} zoomOnScroll={false} zoomOnPinch
       >
-        <Background gap={22} size={1} color="#D6DCE4" />
-        <Controls showInteractive={false} position="bottom-right" fitViewOptions={{ padding: 0.08, duration: 300 }} />
+        <Controls showInteractive={false} position="top-right" fitViewOptions={{ padding: 0.08, duration: 300 }} />
       </ReactFlow>
     </div>
   );

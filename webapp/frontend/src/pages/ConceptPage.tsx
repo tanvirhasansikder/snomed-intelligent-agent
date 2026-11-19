@@ -4,7 +4,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ChevronRight, MessageSquareText, Maximize2, Minimize2 } from "lucide-react";
 import { api, ApiError, type Concept, type Ref } from "../api/client";
 import HierarchyGraph, { type GraphEdge, type GraphNode } from "../components/HierarchyGraph";
-import { ConceptLink, ErrorNote, Section, Sctid, Skeleton } from "../components/bits";
+import { ErrorNote, Section, Sctid, Skeleton } from "../components/bits";
 import { fmtInt } from "../utils/labels";
 import { useDebounced, useMedia, useTitle } from "../utils/hooks";
 
@@ -82,6 +82,8 @@ function Children({ concept }: { concept: Concept }) {
   );
 }
 
+const GRAPH_CHILDREN = 4;
+
 function Lineage({ id }: { id: string }) {
   const navigate = useNavigate();
   const [tall, setTall] = useState(false);
@@ -89,35 +91,48 @@ function Lineage({ id }: { id: string }) {
   const { data, isLoading } = useQuery({ queryKey: ["lineage", id], queryFn: () => api.lineage(id) });
   const graph = useMemo(() => {
     if (!data) return null;
-    const nodes: GraphNode[] = data.nodes.map((n) => ({ id: n.id, name: n.name, tag: n.tag, variant: n.role }));
-    const childIds = new Set(data.nodes.filter((n) => n.role === "child").map((n) => n.id));
-    const edges: GraphEdge[] = data.edges.map((e) => ({ ...e, variant: childIds.has(e.child) ? "muted" : "plain" }));
-    // the concept, its parents and grandparents, and its first children: where a big graph opens
-    const parentsOf = (c: string) => data.edges.filter((e) => e.child === c).map((e) => e.parent);
-    const parents = parentsOf(id);
-    const focus = [id, ...parents, ...parents.flatMap(parentsOf), ...[...childIds].slice(0, 6)];
-    return { nodes, edges, focus };
-  }, [data]);
+    const kids = data.nodes.filter((n) => n.role === "child");
+    const shown = new Set(kids.slice(0, GRAPH_CHILDREN).map((n) => n.id));
+    const nodes: GraphNode[] = data.nodes.filter((n) => n.role !== "child" || shown.has(n.id))
+      .map((n) => ({ id: n.id, name: n.name, tag: n.tag, variant: n.role }));
+    const edges: GraphEdge[] = data.edges.filter((e) => !kids.some((k) => k.id === e.child) || shown.has(e.child))
+      .map((e) => ({ ...e, variant: shown.has(e.child) ? "muted" : "plain" }));
+    const hidden = data.children_total - shown.size;
+    if (hidden > 0) {
+      nodes.push({ id: "__more", name: `${fmtInt(hidden)} more ${hidden === 1 ? "child" : "children"}`, variant: "more" });
+      edges.push({ child: "__more", parent: id, variant: "muted" });
+    }
+    const parents = data.edges.filter((e) => e.child === id).map((e) => e.parent);
+    return { nodes, edges, focus: [id, ...parents, ...shown, ...(hidden > 0 ? ["__more"] : [])] };
+  }, [data, id]);
+  const open = (n: string) => (n === "__more" ? document.getElementById("children")?.scrollIntoView({ behavior: "smooth" }) : navigate(`/concept/${n}`));
   return (
-    <div className={`relative overflow-hidden rounded-xl border border-rule bg-[#F7F9FB] ${tall ? "fixed inset-3 z-40 shadow-pop" : ""}`}>
-      <button type="button" onClick={() => setTall((t) => !t)} className="absolute right-3 top-3 z-10 rounded-md border border-rule bg-surface p-1.5 text-ink-3 hover:text-ink"
-        aria-label={tall ? "Exit full screen" : "Show the graph full screen"}>
-        {tall ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-      </button>
-      {isLoading || !graph ? <Skeleton className="h-[640px] w-full rounded-none" /> : (
-        <HierarchyGraph nodes={graph.nodes} edges={graph.edges} onOpen={(n) => navigate(`/concept/${n}`)}
-          height={tall ? "calc(100vh - 60px)" : wide ? "min(72vh, 720px)" : 440} fitKey={`${id}-${tall}`}
-          focusIds={graph.focus} scrollPans={wide || tall} />
-      )}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-rule bg-surface px-3 py-2 text-xs text-ink-3">
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-ink" />This concept</span>
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm border border-rule-strong bg-surface" />Ancestors</span>
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm border border-dashed border-ink-4 bg-paper" />Children</span>
-        {data && data.children_total > data.children_shown && (
-          <span className="ml-auto">Showing {data.children_shown} of {fmtInt(data.children_total)} children</span>
+    <section aria-labelledby="lineage-h"
+      className={`overflow-hidden rounded-xl border border-rule bg-surface ${tall ? "fixed inset-3 z-40 shadow-pop" : ""}`}>
+      <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-2.5">
+        <div className="flex min-w-0 items-baseline gap-3">
+          <h2 id="lineage-h" className="text-sm font-semibold">Lineage</h2>
+          <span className="hidden truncate text-xs text-ink-3 sm:inline">Every ancestor up to the root. Click a concept to open it.</span>
+        </div>
+        <button type="button" onClick={() => setTall((t) => !t)} className="shrink-0 rounded-md p-1.5 text-ink-3 hover:bg-wash hover:text-ink"
+          aria-label={tall ? "Exit full screen" : "Show the graph full screen"}>
+          {tall ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+        </button>
+      </div>
+      <div className="bg-[#F6F8FA]">
+        {isLoading || !graph ? <Skeleton className="h-[560px] w-full rounded-none" /> : (
+          <HierarchyGraph nodes={graph.nodes} edges={graph.edges} onOpen={open}
+            height={tall ? "calc(100vh - 110px)" : wide ? "min(68vh, 680px)" : 420} fitKey={`${id}-${tall}`}
+            focusIds={graph.focus} scrollPans={wide || tall} />
         )}
       </div>
-    </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-rule px-4 py-2 text-xs text-ink-3">
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] bg-ink" />This concept</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] border border-[#C5CCD7] bg-surface" />Ancestor</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] border border-[#E1E5EB] bg-[#FAFBFC]" />Child</span>
+        <span className="ml-auto tnum">{data ? `${fmtInt(data.nodes.filter((n) => n.role === "ancestor").length)} ancestors` : ""}</span>
+      </div>
+    </section>
   );
 }
 
@@ -135,35 +150,53 @@ export default function ConceptPage() {
     );
   }
 
+  const depth = c ? (c.depth.shortest === c.depth.longest ? String(c.depth.shortest) : `${c.depth.shortest} to ${c.depth.longest}`) : "";
   return (
-    <div className="mx-auto max-w-[1440px] px-4 pb-20 pt-6 sm:px-6">
-      <div className="min-h-[20px]">{c && <Breadcrumb key={c.id} path={c.path} />}</div>
-      <div className="mt-5 grid gap-8 lg:grid-cols-[400px_minmax(0,1fr)] xl:grid-cols-[440px_minmax(0,1fr)]">
-        <article className="min-w-0">
+    <div className="pb-20">
+      <header className="border-b border-rule bg-surface">
+        <div className="mx-auto max-w-[1440px] px-4 pb-6 pt-5 sm:px-6">
+          <div className="min-h-[20px]">{c && <Breadcrumb key={c.id} path={c.path} />}</div>
           {isLoading || !c ? (
-            <div className="space-y-3"><Skeleton className="h-9 w-3/4" /><Skeleton className="h-4 w-1/2" /><Skeleton className="mt-6 h-40 w-full" /></div>
+            <div className="mt-4 space-y-3"><Skeleton className="h-9 w-2/5" /><Skeleton className="h-4 w-1/4" /></div>
           ) : (
-            <div className="animate-rise space-y-8">
-              <header>
+            <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+              <div className="min-w-0 max-w-[78ch]">
                 <h1 className="text-xl font-semibold sm:text-2xl">{c.name}</h1>
-                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                  {c.tag && <span className="rounded border border-rule bg-surface px-1.5 py-px text-xs text-ink-2">{c.tag}</span>}
+                <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-ink-3">
+                  {c.tag && <span className="rounded-md bg-wash px-2 py-0.5 text-xs font-medium text-ink-2">{c.tag}</span>}
                   <Sctid id={c.id} />
+                  {c.hierarchy && c.hierarchy.id !== c.id && (
+                    <span>in <Link to={`/concept/${c.hierarchy.id}`} className="text-ink-2 hover:text-ink hover:underline">{c.hierarchy.name}</Link></span>
+                  )}
                 </div>
-                <p className="mt-3 text-sm text-ink-3">Fully specified name: <span className="text-ink-2">{c.fsn}</span></p>
-              </header>
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-6 lg:gap-8">
+                <dl className="flex gap-6 lg:gap-8">
+                  <Fact label="Depth" value={depth} hint="IS_A steps from the root, by the shortest and the longest route" />
+                  <Fact label="Parents" value={fmtInt(c.parents.length)} />
+                  <Fact label="Children" value={fmtInt(c.children_count)} />
+                  <Fact label="Ancestors" value={fmtInt(c.ancestors_count)} />
+                </dl>
+                <div className="flex gap-2">
+                  <Link to={`/ask?task=T1&x=${c.id}`} className="btn-primary"><MessageSquareText size={15} />Ask about it</Link>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </header>
 
-              <dl className="grid grid-cols-3 gap-4 border-y border-rule py-4">
-                <Fact label="Depth" value={c.depth.shortest === c.depth.longest ? String(c.depth.shortest) : `${c.depth.shortest} to ${c.depth.longest}`}
-                  hint="IS_A steps from the root, by the shortest and the longest route" />
-                <Fact label="Ancestors" value={fmtInt(c.ancestors_count)} />
-                <Fact label="Children" value={fmtInt(c.children_count)} />
-              </dl>
+      <div className="mx-auto mt-6 grid max-w-[1440px] gap-6 px-4 sm:px-6 lg:grid-cols-[380px_minmax(0,1fr)] xl:grid-cols-[420px_minmax(0,1fr)]">
+        <div className="min-w-0 lg:order-2 lg:sticky lg:top-20 lg:self-start"><Lineage id={id} /></div>
+        <article className="min-w-0 lg:order-1">
+          {isLoading || !c ? <Skeleton className="h-72 w-full" /> : (
+            <div className="animate-rise space-y-7">
+              <Section title="Fully specified name"><p className="text-[14.5px] text-ink-2">{c.fsn}</p></Section>
 
               {c.synonyms.length > 0 && (
                 <Section title="Synonyms">
                   <ul className="flex flex-wrap gap-1.5">
-                    {c.synonyms.map((s) => <li key={s} className="rounded-md bg-wash px-2 py-0.5 text-sm text-ink-2">{s}</li>)}
+                    {c.synonyms.map((s) => <li key={s} className="rounded-md border border-rule bg-surface px-2 py-0.5 text-sm text-ink-2">{s}</li>)}
                   </ul>
                 </Section>
               )}
@@ -180,31 +213,24 @@ export default function ConceptPage() {
                 </Section>
               )}
 
-              <Section title="Parents" aside={c.parents.length > 1 ? `${c.parents.length}, it sits in more than one branch` : undefined}>
+              <Section title="Parents" aside={c.parents.length > 1 ? "in more than one branch" : undefined}>
                 {c.parents.length === 0 ? <p className="text-sm text-ink-3">None. This is the root.</p> : (
-                  <ul className="space-y-1.5">
+                  <ul className="divide-y divide-rule rounded-lg border border-rule bg-surface">
                     {c.parents.map((p) => (
-                      <li key={p.id} className="flex items-baseline justify-between gap-3 text-[14.5px]">
-                        <ConceptLink c={p} /><span className="sctid shrink-0">{p.id}</span>
+                      <li key={p.id}>
+                        <Link to={`/concept/${p.id}`} className="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-wash">
+                          <span className="min-w-0 truncate" title={p.name}>{p.name}</span><span className="sctid shrink-0">{p.id}</span>
+                        </Link>
                       </li>
                     ))}
                   </ul>
                 )}
               </Section>
 
-              <Section title="Children" aside={fmtInt(c.children_count)}><Children concept={c} /></Section>
-
-              <div className="flex flex-wrap gap-2 border-t border-rule pt-6">
-                <Link to={`/ask?task=T1&x=${c.id}`} className="btn-quiet"><MessageSquareText size={15} />Ask for its parents</Link>
-                <Link to={`/ask?task=T5&x=${c.id}`} className="btn-quiet">Ask where it sits</Link>
-              </div>
+              <div id="children" className="scroll-mt-24"><Section title="Children" aside={fmtInt(c.children_count)}><Children concept={c} /></Section></div>
             </div>
           )}
         </article>
-        <div className="min-w-0 lg:sticky lg:top-20 lg:self-start">
-          <Lineage id={id} />
-          <p className="mt-2 text-xs text-ink-3">Every ancestor up to the root, with all IS_A links between them. Click a concept to open it.</p>
-        </div>
       </div>
     </div>
   );
