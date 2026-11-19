@@ -245,3 +245,7 @@ data/archive/
 
 # Downloaded papers (other authors' copyrighted work): kept locally, never pushed
 docs/literature/pdf/
+
+# web app frontend dependencies
+webapp/frontend/node_modules/
+webapp/frontend/*.tsbuildinfo

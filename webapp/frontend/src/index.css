@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+  body { @apply bg-paper text-ink font-sans text-base; font-feature-settings: "ss02"; }
+  ::selection { background: #C9D6FB; }
+  :focus-visible { outline: 2px solid #2F5BEA; outline-offset: 2px; border-radius: 4px; }
+  h1, h2, h3 { letter-spacing: -0.012em; }
+}
+
+@layer components {
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-md px-4 h-10 text-sm font-medium transition-colors disabled:opacity-45 disabled:cursor-not-allowed; }
+  .btn-primary { @apply btn bg-ink text-white hover:bg-ink-2; }
+  .btn-quiet { @apply btn bg-surface text-ink border border-rule hover:border-rule-strong hover:bg-wash; }
+  .field-label { @apply block text-sm font-medium text-ink-2 mb-1.5; }
+  .hairline { @apply border-rule; }
+  .sctid { @apply font-mono text-[12.5px] tracking-tight text-ink-3; }
+  .tnum { font-variant-numeric: tabular-nums; }
+}
+
+/* React Flow: quiet chrome that matches the page */
+.react-flow__attribution { display: none; }
+.react-flow__controls { box-shadow: none; border: 1px solid #DDE2E9; border-radius: 8px; overflow: hidden; }
+.react-flow__controls-button { border-bottom: 1px solid #DDE2E9; width: 30px; height: 30px; }
+.react-flow__handle { opacity: 0; pointer-events: none; }
+.react-flow__node:focus-visible { outline: none; }
+.react-flow__node:focus-visible > div { outline: 2px solid #2F5BEA; outline-offset: 2px; }
+
+/* cmdk */
+[cmdk-item][data-selected="true"] { background: #E9EDF2; }
+[cmdk-group-heading] { @apply px-3 pt-3 pb-1 text-xs font-medium text-ink-3; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
