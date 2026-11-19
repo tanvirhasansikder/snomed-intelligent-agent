@@ -57,6 +57,7 @@
       "G-QA+V@50",
       "G-QA+V@50:random"
     ],
+    "prompt_version": "v3.0",
     "tasks": [
       "T1",
       "T2",

@@ -48,7 +48,7 @@ from evaluation.text_retrieval import (
 )
 from llm.agent import HierarchyAgent
 from llm.client import CachedClient, estimate_tokens
-from llm.prompt_manager import PROMPT_VERSION, REGENERATION_VERSION, build_messages
+from llm.prompt_manager import REGENERATION_VERSION, STUDY2_PROMPT_VERSION, build_messages
 from llm.providers import build_client
 
 logger = logging.getLogger(__name__)
@@ -161,6 +161,7 @@ class Study2Experiment(SystemExperiment):
         if len(set(names)) != len(names):
             raise ValueError("duplicate condition names")
         self.mask_seed = self.exp["mask_seed"]
+        self.prompt_version = self.exp.get("prompt_version", STUDY2_PROMPT_VERSION)
         self.text_k = self.exp.get("text_k", 10)
         source = self.config["retrieval_source"]
         self.db_path = _project_path(source["local_db"])
@@ -241,7 +242,7 @@ class Study2Experiment(SystemExperiment):
     # ------------------------------------------------------------------
     def _row2(self, item, name, condition, model_name, rep, context, requests, mask, text_record):
         row = {
-            "protocol_version": PROTOCOL_VERSION, "prompt_version": PROMPT_VERSION,
+            "protocol_version": PROTOCOL_VERSION, "prompt_version": self.prompt_version,
             "regeneration_version": REGENERATION_VERSION, "mask_version": MASK_VERSION,
             "text_retrieval_version": TEXT_RETRIEVAL_VERSION,
             "experiment": self.config["name"], "system": name, "base_system": condition.base,
@@ -337,7 +338,7 @@ class Study2Experiment(SystemExperiment):
             context, requests, mask, text_record = self.condition_context(item, condition)
             llm = _RunLLM(clients[spec["name"]], self._metadata2(item, condition, context), rep)
             agent = HierarchyAgent(llm, self.local, label_of=self._label, evidence_format=condition.render_format,
-                                   request_budget=self.request_budget)
+                                   request_budget=self.request_budget, prompt_version=self.prompt_version)
             started = time.time()
             result = agent.answer(item, condition.agent_system, context=context, retrieval_requests=requests)
 
@@ -398,7 +399,7 @@ class Study2Experiment(SystemExperiment):
         for spec, condition, item, rep in self.plan_systems(models):
             context, _, _, _ = self.condition_context(item, condition)
             text = context.render(condition.render_format) if condition.retrieval != "C0" else context.render("plain")
-            messages = build_messages(item, text, self._label)
+            messages = build_messages(item, text, self._label, version=self.prompt_version)
             tokens = estimate_tokens(" ".join(m["content"] for m in messages))
             entry = summary.setdefault(spec["name"], {"calls": 0, "prompt_tokens_est": 0, "max_completion_tokens": 0,
                                                       "by_condition": {}})

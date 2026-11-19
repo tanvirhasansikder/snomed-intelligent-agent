@@ -149,8 +149,9 @@ class HierarchyAgent:
     """
 
     def __init__(self, llm, retrieval_client, label_of=None, evidence_format="v2", child_display_cap=100,
-                 request_budget=DEFAULT_BUDGET):
+                 request_budget=DEFAULT_BUDGET, prompt_version=PROMPT_VERSION):
         self.request_budget = request_budget
+        self.prompt_version = prompt_version
         self.llm = llm
         self.retrieval_client = retrieval_client
         self._label_of = label_of
@@ -205,7 +206,8 @@ class HierarchyAgent:
         result.evidence_sufficient = sufficient(item, context)
 
         label_of = lambda cid: self.label(cid, context)  # noqa: E731
-        messages = build_messages(item, result.evidence_text, label_of)
+        result.prompt_version = self.prompt_version
+        messages = build_messages(item, result.evidence_text, label_of, version=self.prompt_version)
         try:
             response = self.llm.complete(messages)
         except LLMError as exc:

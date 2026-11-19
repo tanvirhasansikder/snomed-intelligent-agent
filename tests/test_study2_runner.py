@@ -68,7 +68,7 @@ def setup(tmp_path_factory):
         "retrieval_source": {"local_db": str(db), "view": "international", "dense_dir": str(dense),
                              "query_vectors": "query_vectors_ds.npz"},
         "experiment": {"study": 2, "conditions": CONDITIONS, "tasks": ["T1", "T2", "T3", "T4", "T5", "T6"],
-                       "request_budget": 1000, "item_seed": 0, "mask_seed": 7, "text_k": 6},
+                       "request_budget": 1000, "item_seed": 0, "mask_seed": 7, "text_k": 6, "prompt_version": "v3.0"},
         "models": [MOCK],
     }
     # query vectors for every name the items need (random here; real ones come from BGE-M3)
@@ -142,7 +142,7 @@ def test_full_run_with_the_mock_model(setup):
     for r in rows:
         if r["system"].startswith("G-QA+V") and r["model_name"] == "mock":
             assert r["n_new_calls"] <= 1                    # only a possible regeneration is new
-    assert all(r["protocol_version"] == "3.0" for r in rows)
+    assert all(r["protocol_version"] == "3.0" and r["prompt_version"] == "v3.0" for r in rows)
 
     # a second run collects nothing new
     again = Study2Experiment(config, local_client=client)

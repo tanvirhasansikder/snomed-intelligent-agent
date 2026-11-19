@@ -6,7 +6,9 @@ The system prompt is identical across conditions and context formats, so the
 only manipulated variable is the evidence block itself.
 """
 
-PROMPT_VERSION = "v2.0"  # v2.0: claims cite evidence edge IDs (protocol v2.0)
+PROMPT_VERSION = "v2.0"  # v2.0: claims cite evidence edge IDs (protocol v2.0, Study 1; the default)
+#: v3.0 (protocol v3, Study 2): T3 tells the model how to support a "no" (see QUESTIONS_V3 below).
+STUDY2_PROMPT_VERSION = "v3.0"
 
 SYSTEM_PROMPT = (
     "You answer questions about the SNOMED CT clinical terminology hierarchy. "
@@ -50,6 +52,19 @@ QUESTIONS = {
            "claims for both concepts.",
            '{{"answer": ["<ancestor ID>", ...], "claims": [...], "insufficient_evidence": false}}'),
 }
+
+
+#: Protocol v3 changes one question. The claim schema has no relation for "X is NOT a kind of Y", so in
+#: Study 1 and the v3 pilot the model supported a "no" by writing the asked relation itself (a false
+#: claim); verification then removed it and the answer collapsed to "unknown" (55 of S1's 64
+#: false-claim items in Study 1; G-QA+V abstained on 3/3 certified "no" items in the v3 pilot).
+QUESTIONS_V3 = dict(QUESTIONS, T3=(
+    "Is {x} a kind of {y}, directly or through intermediate concepts? "
+    "Support \"yes\" with the ancestor or direct_parent claims of the connecting path. "
+    "Support \"no\" with ancestor claims for the general concepts that {x_id} is a kind of; "
+    "never write a claim that {x_id} is a kind of {y_id} when your answer is \"no\".",
+    '{{"answer": "yes" | "no" | "unknown", "claims": [...], "insufficient_evidence": false}}'))
+PROMPTS = {"v2.0": QUESTIONS, "v3.0": QUESTIONS_V3}
 
 
 def concept_ref(concept_id, label):
@@ -100,10 +115,11 @@ def build_regeneration_messages(messages, first_reply, problems):
                              {"role": "user", "content": "\n".join(lines)}]
 
 
-def build_messages(item, context_text, label_of):
+def build_messages(item, context_text, label_of, version=PROMPT_VERSION):
     """Chat messages for one item. ``label_of`` maps concept ID to preferred label."""
-
-    question, schema = QUESTIONS[item.task]
+    if version not in PROMPTS:
+        raise ValueError(f"unknown prompt version {version!r}; known: {sorted(PROMPTS)}")
+    question, schema = PROMPTS[version][item.task]
     fill = {
         "x": concept_ref(item.concept_id, label_of(item.concept_id)),
         "x_id": item.concept_id,
