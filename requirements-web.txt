@@ -1,4 +1,5 @@
 # Web app (python -m webapp.server). The built frontend ships in webapp/static, so Node.js is not needed.
-fastapi>=0.115
-uvicorn>=0.30
-httpx>=0.27   # only for tests/test_webapp.py
+# Pinned to versions tested together; starlette is pinned in requirements.txt (1.10.0, also fine for Streamlit).
+fastapi==0.165.0
+uvicorn==0.51.0
+httpx==0.28.1   # only for tests/test_webapp.py
