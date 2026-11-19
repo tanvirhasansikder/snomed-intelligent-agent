@@ -9,9 +9,10 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@xyflow/react/dist/style.css";
 import "./index.css";
 import App from "./App";
+import { ApiError } from "./api/client";
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: Infinity, refetchOnWindowFocus: false, retry: 1 } },
+  defaultOptions: { queries: { staleTime: Infinity, refetchOnWindowFocus: false, retry: (n, e) => n < 1 && !(e instanceof ApiError && e.status < 500) } },
 });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

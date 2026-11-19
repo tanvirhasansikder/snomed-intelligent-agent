@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { GitCompareArrows, Loader2, Send } from "lucide-react";
@@ -122,6 +122,19 @@ export default function AskPage({ status }: { status: Status }) {
   const error = mode === "one" ? ask.error : mode === "all" ? compare.error : null;
   const compareSel = compare.data?.results.find((r) => r.system === selected) ?? compare.data?.results[0];
 
+  // bring the answer (or the error) into view when it is off screen, e.g. on a phone below the form
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const settled = `${mode}-${busy}-${!!error}-${ask.data?.system ?? ""}-${compare.data ? "c" : ""}`;
+  useEffect(() => {
+    const el = resultsRef.current;
+    if (!el || !mode) return;
+    const top = el.getBoundingClientRect().top;
+    if (top < 56 || top > window.innerHeight * 0.6) {
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.scrollTo({ top: window.scrollY + top - 72, behavior: reduce ? "auto" : "smooth" });
+    }
+  }, [settled]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="mx-auto max-w-[1440px] px-4 pb-24 pt-8 sm:px-6">
       <div className="grid gap-10 lg:grid-cols-[380px_minmax(0,1fr)]">
@@ -204,7 +217,7 @@ export default function AskPage({ status }: { status: Status }) {
           </div>
         </form>
 
-        <div className="min-w-0" aria-live="polite">
+        <div className="min-w-0 scroll-mt-20" aria-live="polite" ref={resultsRef}>
           {error && <div className="mb-6"><ErrorNote title="That question could not be asked." detail={(error as Error).message} /></div>}
           {busy && (
             <div className="space-y-3 rounded-xl border border-rule bg-surface p-6">

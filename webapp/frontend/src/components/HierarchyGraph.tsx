@@ -19,7 +19,7 @@ export type GraphEdge = {
 };
 
 const W = 216;
-const H = 66;
+const H = 72;
 
 const NODE_STYLE: Record<GraphNode["variant"], string> = {
   focus: "bg-ink text-white border-ink",
@@ -48,7 +48,7 @@ const ConceptNode = memo(({ data }: NodeProps<Node<Data>>) => {
   const clickable = !!data.onOpen && data.variant !== "focus";
   return (
     <div
-      className={`group flex h-[66px] w-[216px] flex-col justify-center rounded-lg border px-3 py-2 shadow-node transition-colors ${NODE_STYLE[data.variant]} ${clickable ? "cursor-pointer hover:border-ink" : ""}`}
+      className={`group flex h-[72px] w-[216px] flex-col justify-center rounded-lg border px-3 py-2 shadow-node transition-colors ${NODE_STYLE[data.variant]} ${clickable ? "cursor-pointer hover:border-ink" : ""}`}
       title={data.note ? `${data.name}: ${data.note}` : `${data.name}${data.tag ? ` (${data.tag})` : ""}`}
     >
       <Handle type="target" position={Position.Top} />
@@ -76,7 +76,9 @@ function layout(nodes: GraphNode[], edges: GraphEdge[]) {
   }));
 }
 
-function Inner({ nodes, edges, onOpen, height, fitKey }: Props) {
+const BIG = 24;
+
+function Inner({ nodes, edges, onOpen, height, fitKey, focusIds, scrollPans }: Props) {
   const flow = useReactFlow();
   const { rfNodes, rfEdges } = useMemo(() => {
     const ids = new Set(nodes.map((n) => n.id));
@@ -100,22 +102,31 @@ function Inner({ nodes, edges, onOpen, height, fitKey }: Props) {
     return { rfNodes, rfEdges };
   }, [nodes, edges, onOpen]);
 
+  // small graphs fit whole; big ones open centred on the first focus node at a readable zoom,
+  // a little above it so its parents show (the fit button in the corner shows everything)
   useEffect(() => {
-    const t = setTimeout(() => flow.fitView({ padding: 0.12, duration: 300, maxZoom: 1.05 }), 30);
+    const t = setTimeout(() => {
+      const focus = focusIds?.[0] && rfNodes.find((n) => n.id === focusIds[0]);
+      if (rfNodes.length > BIG && focus) {
+        flow.setCenter(focus.position.x + W / 2, focus.position.y + H / 2 - 110, { zoom: 0.9, duration: 300 });
+      } else {
+        flow.fitView({ padding: 0.12, duration: 300, maxZoom: 1.05 });
+      }
+    }, 30);
     return () => clearTimeout(t);
-  }, [fitKey, flow, rfNodes.length]);
+  }, [fitKey, flow, rfNodes, focusIds]);
 
   return (
     <div style={{ height }} className="w-full">
       <ReactFlow
-        nodes={rfNodes} edges={rfEdges} nodeTypes={nodeTypes} fitView minZoom={0.15} maxZoom={1.6}
+        nodes={rfNodes} edges={rfEdges} nodeTypes={nodeTypes} minZoom={0.15} maxZoom={1.6}
         nodesDraggable={false} nodesConnectable={false} elementsSelectable={false} proOptions={{ hideAttribution: true }}
         onNodeClick={(_, n) => onOpen && n.id !== nodes.find((x) => x.variant === "focus")?.id && onOpen(n.id)}
         onNodeDoubleClick={(_, n) => onOpen?.(n.id)}
-        panOnScroll zoomOnScroll={false} zoomOnPinch
+        panOnScroll={!!scrollPans} preventScrolling={!!scrollPans} zoomOnScroll={false} zoomOnPinch
       >
         <Background gap={22} size={1} color="#D6DCE4" />
-        <Controls showInteractive={false} position="bottom-right" />
+        <Controls showInteractive={false} position="bottom-right" fitViewOptions={{ padding: 0.08, duration: 300 }} />
       </ReactFlow>
     </div>
   );
@@ -123,6 +134,10 @@ function Inner({ nodes, edges, onOpen, height, fitKey }: Props) {
 
 type Props = {
   nodes: GraphNode[]; edges: GraphEdge[]; onOpen?: (id: string) => void; height: number | string; fitKey?: string;
+  /** big graphs open zoomed on these nodes */
+  focusIds?: string[];
+  /** the scroll wheel pans the graph (only where the graph does not sit in the page's scroll path) */
+  scrollPans?: boolean;
 };
 
 export default function HierarchyGraph(props: Props) {

@@ -76,8 +76,8 @@ export const api = {
   search: (q: string, limit = 12) =>
     call<{ results: SearchHit[] }>(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`).then((r) => r.results),
   concept: (id: string) => call<Concept>(`/api/concept/${id}`),
-  children: (id: string, offset: number, limit = 50) =>
-    call<{ total: number; children: Ref[] }>(`/api/concept/${id}/children?offset=${offset}&limit=${limit}`),
+  children: (id: string, offset: number, limit = 50, q = "") =>
+    call<{ total: number; children: Ref[] }>(`/api/concept/${id}/children?offset=${offset}&limit=${limit}&q=${encodeURIComponent(q)}`),
   lineage: (id: string) => call<Lineage>(`/api/concept/${id}/lineage`),
   ask: (req: AskRequest) => call<AskResult>("/api/ask", { method: "POST", body: JSON.stringify(req) }),
   compare: (req: { task: string; x: string; y?: string | null; model: string }) =>

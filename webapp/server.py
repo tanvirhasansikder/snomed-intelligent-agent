@@ -347,11 +347,16 @@ def concept(concept_id: str):
 
 
 @app.get("/api/concept/{concept_id}/children")
-def concept_children(concept_id: str, offset: int = Query(0, ge=0), limit: int = Query(CHILD_PAGE, ge=1, le=500)):
+def concept_children(concept_id: str, offset: int = Query(0, ge=0), limit: int = Query(CHILD_PAGE, ge=1, le=500),
+                     q: str = Query("", max_length=100)):
+    """A page of the concept's children by name; ``q`` keeps those whose name contains it (any case)."""
     demo = state.require()
     if concept_id not in demo.graph:
         raise HTTPException(404, f"{concept_id} is not in the International view")
     children = sorted(demo.graph.children_of(concept_id), key=lambda c: (demo.graph.name(c) or "").lower())
+    if q.strip():
+        needle = q.strip().lower()
+        children = [c for c in children if needle in (demo.graph.name(c) or "").lower() or needle == c]
     return {"total": len(children), "offset": offset,
             "children": [_concept_ref(demo, c) for c in children[offset:offset + limit]]}
 

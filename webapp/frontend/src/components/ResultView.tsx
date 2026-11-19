@@ -9,8 +9,21 @@ import {
   CITATION_TEXT, LABEL_TONE, LEGEND, RELATION_TEXT, SYSTEM_NAME, TONE_HEX, TONE_TEXT, type Tone,
 } from "../utils/labels";
 
-function Answer({ value, empty }: { value: Ref[] | string | null; empty: string }) {
+function Answer({ value, empty, path }: { value: Ref[] | string | null; empty: string; path?: boolean }) {
   if (value == null) return <span className="text-ink-3">{empty}</span>;
+  if (path && Array.isArray(value) && value.length > 0) {
+    return (
+      <ol className="relative space-y-1.5 border-l border-rule-strong pl-4">
+        {value.map((c, i) => (
+          <li key={`${c.id}-${i}`} className="relative flex items-baseline justify-between gap-3">
+            <span aria-hidden className={`absolute -left-[21px] top-[7px] h-2 w-2 rounded-full ${i === 0 || i === value.length - 1 ? "bg-ink" : "border border-ink-4 bg-surface"}`} />
+            <span>{i > 0 && <span className="text-ink-3">is a </span>}<ConceptLink c={c} /></span>
+            <span className="sctid shrink-0">{c.id}</span>
+          </li>
+        ))}
+      </ol>
+    );
+  }
   if (typeof value === "string") return <span className="font-medium">{value === "yes" ? "Yes" : value === "no" ? "No" : value}</span>;
   if (value.length === 0) return <span className="text-ink-3">An empty list</span>;
   return (
@@ -56,18 +69,20 @@ export function ClaimRow({ claim, active, onHover }: { claim: Claim; active?: bo
   );
 }
 
-function buildGraph(r: AskResult) {
+function buildGraph(r: AskResult, claimsOnly: boolean) {
   const nodes = new Map<string, GraphNode>();
   const put = (c: Ref, variant: GraphNode["variant"]) => {
     const old = nodes.get(c.id);
     if (!old || (old.variant === "evidence" && variant !== "evidence")) nodes.set(c.id, { id: c.id, name: c.name, tag: c.tag, variant });
   };
   const edges = new Map<string, GraphEdge>();
+  const claimed = new Set(r.claims.flatMap((c) => c.cites));
   r.evidence.edges.forEach((e) => {
+    if (claimsOnly && !claimed.has(e.id)) return;
     put(e.child, "evidence"); put(e.parent, "evidence");
     edges.set(`${e.child.id}>${e.parent.id}`, { child: e.child.id, parent: e.parent.id, variant: "evidence", label: e.id });
   });
-  r.evidence.mask?.withheld_edges.forEach((e) => {
+  if (!claimsOnly) r.evidence.mask?.withheld_edges.forEach((e) => {
     put(e.child, "withheld"); put(e.parent, "withheld");
     edges.set(`${e.child.id}>${e.parent.id}`, { child: e.child.id, parent: e.parent.id, variant: "withheld", label: "withheld" });
   });
@@ -84,17 +99,32 @@ function buildGraph(r: AskResult) {
   put(x, "focus");
   nodes.set(x.id, { ...nodes.get(x.id)!, variant: "focus" });
   if (r.question.y) { put(r.question.y, "target"); nodes.set(r.question.y.id, { ...nodes.get(r.question.y.id)!, variant: "target" }); }
-  return { nodes: [...nodes.values()], edges: [...edges.values()] };
+  const focus = [x.id, ...(r.question.y ? [r.question.y.id] : []),
+    ...r.claims.flatMap((c) => [c.subject.id, c.object?.id ?? ""]).filter(Boolean)].filter((id) => nodes.has(id));
+  return { nodes: [...nodes.values()], edges: [...edges.values()], focus };
 }
+
+const BIG_EVIDENCE = 30;
 
 function EvidenceGraph({ r }: { r: AskResult }) {
   const navigate = useNavigate();
-  const g = useMemo(() => buildGraph(r), [r]);
+  const big = r.evidence.edges.length > BIG_EVIDENCE && r.claims.some((c) => c.object);
+  const [claimsOnly, setClaimsOnly] = useState(big);
+  const g = useMemo(() => buildGraph(r, claimsOnly), [r, claimsOnly]);
   if (g.edges.length === 0) return null;
   return (
     <div className="overflow-hidden rounded-xl border border-rule bg-[#F7F9FB]">
-      <HierarchyGraph nodes={g.nodes} edges={g.edges} height={Math.min(560, 160 + g.nodes.length * 34)}
-        onOpen={(id) => navigate(`/concept/${id}`)} fitKey={`${r.system}-${r.withheld}-${r.question.x.id}`} />
+      {big && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rule bg-surface px-3 py-2 text-sm">
+          <span className="text-ink-3">{claimsOnly ? "Showing only the links the claims rest on." : `Showing all ${r.evidence.edges.length} evidence links.`}</span>
+          <button type="button" onClick={() => setClaimsOnly((v) => !v)} className="font-medium text-ink-2 hover:text-ink">
+            {claimsOnly ? `Show all ${r.evidence.edges.length} links` : "Show claim links only"}
+          </button>
+        </div>
+      )}
+      <HierarchyGraph nodes={g.nodes} edges={g.edges} height={Math.min(640, 200 + g.nodes.length * 48)}
+        onOpen={(id) => navigate(`/concept/${id}`)} fitKey={`${r.system}-${r.withheld}-${r.question.x.id}-${claimsOnly}`}
+        focusIds={g.focus} />
       <div className="flex flex-wrap gap-x-5 gap-y-1.5 border-t border-rule bg-surface px-3 py-2 text-xs text-ink-3">
         <span className="flex items-center gap-1.5"><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" stroke="#8D97A9" strokeWidth="1.5" /></svg>Link in the evidence</span>
         {r.evidence.mask && r.evidence.mask.n_withheld > 0 && (
@@ -179,13 +209,14 @@ export default function ResultView({ r }: { r: AskResult }) {
           <h3 className="mt-4 text-sm font-medium text-ink-3">The model answered</h3>
           <div className="mt-1.5 text-[15px]">
             {r.abstained ? <span className="flex items-center gap-2 text-ink-2"><CircleSlash size={16} />It said the evidence was not enough to answer.</span>
-              : <Answer value={r.answer} empty="No answer" />}
+              : <Answer value={r.answer} empty="No answer" path={r.question.task === "T4"} />}
           </div>
         </div>
         <div className="border-t border-rule pt-5 md:border-l md:border-t-0 md:pl-6 md:pt-0">
           <h3 className="text-sm font-medium text-ink-3">SNOMED CT says</h3>
           <div className="mt-1.5 text-[15px]">
             {r.question.task === "T5" ? <span className="text-ink-3">An explanation has no single right answer; its claims are checked one by one.</span>
+              : r.question.task === "T4" ? <span className="text-ink-3">Any chain of IS_A links from {r.question.x.name} up to {r.question.y?.name} is right. Each step is checked below.</span>
               : <Answer value={r.question.gold} empty="Not decidable" />}
           </div>
         </div>

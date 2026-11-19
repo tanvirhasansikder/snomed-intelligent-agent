@@ -59,6 +59,8 @@ def test_concept_detail(client):
     assert client.get("/api/concept/999").status_code == 404
     page = client.get(f"/api/concept/{MI}/children", params={"offset": 1, "limit": 1}).json()
     assert page["total"] == 2 and len(page["children"]) == 1
+    hits = client.get(f"/api/concept/{MI}/children", params={"q": "ACUTE"}).json()
+    assert [c["id"] for c in hits["children"]] == [AMI] and hits["total"] == 1
 
 
 def test_lineage_is_the_ancestor_closure_plus_children(client):

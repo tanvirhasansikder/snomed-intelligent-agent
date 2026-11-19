@@ -6,16 +6,22 @@ import { api, ApiError, type Concept, type Ref } from "../api/client";
 import HierarchyGraph, { type GraphEdge, type GraphNode } from "../components/HierarchyGraph";
 import { ConceptLink, ErrorNote, Section, Sctid, Skeleton } from "../components/bits";
 import { fmtInt } from "../utils/labels";
-import { useTitle } from "../utils/hooks";
+import { useDebounced, useMedia, useTitle } from "../utils/hooks";
 
 function Breadcrumb({ path }: { path: Ref[] }) {
+  const [open, setOpen] = useState(false);
+  const long = path.length > 5 && !open;
+  const shown: (Ref | null)[] = long ? [path[0], null, ...path.slice(-3)] : path;
   return (
     <nav aria-label="Path from the root" className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm text-ink-3">
-      {path.map((p, i) => (
-        <span key={p.id} className="flex items-center gap-1">
-          {i > 0 && <ChevronRight size={13} className="text-ink-4" aria-hidden />}
-          {i === path.length - 1 ? <span className="text-ink-2" aria-current="page">{p.name}</span>
-            : <Link to={`/concept/${p.id}`} className="hover:text-ink hover:underline">{p.name}</Link>}
+      {shown.map((p, i) => (
+        <span key={p ? p.id : "more"} className="flex min-w-0 items-center gap-1">
+          {i > 0 && <ChevronRight size={13} className="shrink-0 text-ink-4" aria-hidden />}
+          {p === null ? (
+            <button type="button" onClick={() => setOpen(true)} className="rounded px-1 hover:bg-wash hover:text-ink"
+              aria-label={`Show the ${path.length - 4} hidden steps`}>{path.length - 4} more</button>
+          ) : i === shown.length - 1 ? <span className="truncate text-ink-2" aria-current="page">{p.name}</span>
+            : <Link to={`/concept/${p.id}`} className="truncate hover:text-ink hover:underline" title={p.name}>{p.name}</Link>}
         </span>
       ))}
     </nav>
@@ -33,38 +39,45 @@ function Fact({ label, value, hint }: { label: string; value: string; hint?: str
 
 function Children({ concept }: { concept: Concept }) {
   const [filter, setFilter] = useState("");
+  const q = useDebounced(filter.trim(), 200);
   const pages = useInfiniteQuery({
-    queryKey: ["children", concept.id],
-    queryFn: ({ pageParam }) => api.children(concept.id, pageParam, 100),
+    queryKey: ["children", concept.id, q],
+    queryFn: ({ pageParam }) => api.children(concept.id, pageParam, 100, q),
     initialPageParam: 0,
     getNextPageParam: (last, all) => { const n = all.reduce((s, p) => s + p.children.length, 0); return n < last.total ? n : undefined; },
-    initialData: { pages: [{ total: concept.children_count, children: concept.children }], pageParams: [0] },
+    initialData: q ? undefined : { pages: [{ total: concept.children_count, children: concept.children }], pageParams: [0] },
   });
   const all = pages.data?.pages.flatMap((p) => p.children) ?? [];
-  const shown = filter ? all.filter((c) => c.name.toLowerCase().includes(filter.toLowerCase())) : all;
+  const total = pages.data?.pages[0]?.total ?? 0;
   if (concept.children_count === 0) return <p className="text-sm text-ink-3">None. This concept has no subtypes in the International view.</p>;
   return (
     <div>
       {concept.children_count > 8 && (
-        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={`Filter ${fmtInt(all.length)} loaded`}
-          aria-label="Filter children" className="mb-2 h-9 w-full rounded-md border border-rule bg-surface px-3 text-sm outline-none focus:border-ink" />
+        <div className="relative mb-2">
+          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={`Filter all ${fmtInt(concept.children_count)} children`}
+            aria-label="Filter children" className="h-9 w-full rounded-md border border-rule bg-surface px-3 text-sm outline-none focus:border-ink" />
+          {q && <span className="absolute right-3 top-2 text-xs text-ink-3 tnum">{pages.isFetching ? "" : `${fmtInt(total)} match`}</span>}
+        </div>
       )}
-      <ul className="max-h-[420px] overflow-auto rounded-lg border border-rule bg-surface">
-        {shown.map((c) => (
+      <ul className="max-h-[420px] overflow-auto rounded-lg border border-rule bg-surface" aria-busy={pages.isFetching}>
+        {all.map((c) => (
           <li key={c.id} className="border-b border-rule last:border-b-0">
             <Link to={`/concept/${c.id}`} className="flex items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-wash">
-              <span className="min-w-0 truncate">{c.name}</span>
+              <span className="min-w-0 truncate" title={c.name}>{c.name}</span>
               <span className="sctid shrink-0">{c.id}</span>
             </Link>
           </li>
         ))}
-        {shown.length === 0 && <li className="px-3 py-3 text-sm text-ink-3">No loaded child matches “{filter}”.</li>}
+        {q && !pages.isFetching && all.length === 0 && <li className="px-3 py-3 text-sm text-ink-3">No child matches “{q}”.</li>}
+        {pages.hasNextPage && (
+          <li>
+            <button type="button" onClick={() => pages.fetchNextPage()} disabled={pages.isFetchingNextPage}
+              className="w-full px-3 py-2.5 text-left text-sm font-medium text-ink-2 hover:bg-wash">
+              {pages.isFetchingNextPage ? "Loading" : `Show more (${fmtInt(total - all.length)} left)`}
+            </button>
+          </li>
+        )}
       </ul>
-      {pages.hasNextPage && (
-        <button type="button" onClick={() => pages.fetchNextPage()} disabled={pages.isFetchingNextPage} className="btn-quiet mt-2 w-full">
-          {pages.isFetchingNextPage ? "Loading" : `Load more (${fmtInt(concept.children_count - all.length)} left)`}
-        </button>
-      )}
     </div>
   );
 }
@@ -72,13 +85,18 @@ function Children({ concept }: { concept: Concept }) {
 function Lineage({ id }: { id: string }) {
   const navigate = useNavigate();
   const [tall, setTall] = useState(false);
+  const wide = useMedia("(min-width: 1024px)");
   const { data, isLoading } = useQuery({ queryKey: ["lineage", id], queryFn: () => api.lineage(id) });
   const graph = useMemo(() => {
     if (!data) return null;
     const nodes: GraphNode[] = data.nodes.map((n) => ({ id: n.id, name: n.name, tag: n.tag, variant: n.role }));
     const childIds = new Set(data.nodes.filter((n) => n.role === "child").map((n) => n.id));
     const edges: GraphEdge[] = data.edges.map((e) => ({ ...e, variant: childIds.has(e.child) ? "muted" : "plain" }));
-    return { nodes, edges };
+    // the concept, its parents and grandparents, and its first children: where a big graph opens
+    const parentsOf = (c: string) => data.edges.filter((e) => e.child === c).map((e) => e.parent);
+    const parents = parentsOf(id);
+    const focus = [id, ...parents, ...parents.flatMap(parentsOf), ...[...childIds].slice(0, 6)];
+    return { nodes, edges, focus };
   }, [data]);
   return (
     <div className={`relative overflow-hidden rounded-xl border border-rule bg-[#F7F9FB] ${tall ? "fixed inset-3 z-40 shadow-pop" : ""}`}>
@@ -88,7 +106,8 @@ function Lineage({ id }: { id: string }) {
       </button>
       {isLoading || !graph ? <Skeleton className="h-[640px] w-full rounded-none" /> : (
         <HierarchyGraph nodes={graph.nodes} edges={graph.edges} onOpen={(n) => navigate(`/concept/${n}`)}
-          height={tall ? "calc(100vh - 60px)" : "min(72vh, 720px)"} fitKey={`${id}-${tall}`} />
+          height={tall ? "calc(100vh - 60px)" : wide ? "min(72vh, 720px)" : 440} fitKey={`${id}-${tall}`}
+          focusIds={graph.focus} scrollPans={wide || tall} />
       )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-rule bg-surface px-3 py-2 text-xs text-ink-3">
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-ink" />This concept</span>
@@ -118,7 +137,7 @@ export default function ConceptPage() {
 
   return (
     <div className="mx-auto max-w-[1440px] px-4 pb-20 pt-6 sm:px-6">
-      <div className="min-h-[20px]">{c && <Breadcrumb path={c.path} />}</div>
+      <div className="min-h-[20px]">{c && <Breadcrumb key={c.id} path={c.path} />}</div>
       <div className="mt-5 grid gap-8 lg:grid-cols-[400px_minmax(0,1fr)] xl:grid-cols-[440px_minmax(0,1fr)]">
         <article className="min-w-0">
           {isLoading || !c ? (
